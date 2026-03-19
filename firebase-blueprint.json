@@ -1,0 +1,216 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user health data and preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "height": { "type": "number" },
+        "weight": { "type": "number" },
+        "gender": { "type": "string", "enum": ["male", "female", "other"] },
+        "nationality": { "type": "string" },
+        "age": { "type": "number" },
+        "phoneNumber": { "type": "string" },
+        "country": { "type": "string" },
+        "healthStatus": { "type": "string" },
+        "goal": { "type": "string", "enum": ["weight_loss", "muscle_gain", "maintenance", "fitness"] },
+        "budgetLevel": { "type": "string", "enum": ["low", "medium", "high"] },
+        "dietaryPreferences": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "coach", "admin"] },
+        "banned": { "type": "boolean" },
+        "playsSports": { "type": "boolean" },
+        "selectedSports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sportId": { "type": "string" },
+              "goalIds": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Coach": {
+      "title": "Coach Profile",
+      "description": "Professional details for trainers",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "specialties": { "type": "array", "items": { "type": "string" } },
+        "price": { "type": "number" },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "photoURL": { "type": "string" }
+      },
+      "required": ["uid", "displayName"]
+    },
+    "DailyLog": {
+      "title": "Daily Health Log",
+      "description": "Daily tracking of food and exercise",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "meals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "calories": { "type": "number" },
+              "protein": { "type": "number" },
+              "carbs": { "type": "number" },
+              "fats": { "type": "number" },
+              "imageUrl": { "type": "string" }
+            }
+          }
+        },
+        "totalCalories": { "type": "number" },
+        "exercise": { "type": "string" },
+        "waterIntake": { "type": "number" },
+        "fitCalories": { "type": "number" },
+        "fitSteps": { "type": "number" },
+        "fitDistance": { "type": "number" },
+        "fitActiveMinutes": { "type": "number" },
+        "appleSteps": { "type": "number" },
+        "appleCalories": { "type": "number" },
+        "appleHeartRate": { "type": "number" }
+      },
+      "required": ["userId", "date"]
+    },
+    "InBodyLog": {
+      "title": "InBody Measurement",
+      "description": "Detailed body composition data",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "weight": { "type": "number" },
+        "bodyFat": { "type": "number" },
+        "muscleMass": { "type": "number" },
+        "waterPercentage": { "type": "number" }
+      },
+      "required": ["userId", "date"]
+    },
+    "WorkoutPlan": {
+      "title": "Workout Plan",
+      "description": "Personalized weekly workout schedule",
+      "type": "object",
+      "properties": {
+        "planTitle": { "type": "string" },
+        "weeklySchedule": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "day": { "type": "string" },
+              "exercises": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "sets": { "type": "number" },
+                    "reps": { "type": "string" },
+                    "rest": { "type": "string" },
+                    "videoUrl": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "injuryPreventionTips": { "type": "array", "items": { "type": "string" } },
+        "scientificBasis": { "type": "string" }
+      },
+      "required": ["planTitle", "weeklySchedule"]
+    },
+    "NutritionPlan": {
+      "title": "Nutrition Plan",
+      "description": "Personalized daily meal plan",
+      "type": "object",
+      "properties": {
+        "planTitle": { "type": "string" },
+        "meals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mealType": { "type": "string" },
+              "name": { "type": "string" },
+              "calories": { "type": "number" },
+              "description": { "type": "string" },
+              "protein": { "type": "number" },
+              "carbs": { "type": "number" },
+              "fats": { "type": "number" },
+              "consumed": { "type": "boolean" }
+            }
+          }
+        },
+        "targetCalories": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["planTitle", "meals", "targetCalories"]
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "Recipe with ingredients and nutritional data",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "amountGrams": { "type": "number" }
+            },
+            "required": ["name", "amountGrams"]
+          }
+        },
+        "totalCalories": { "type": "number" },
+        "totalProtein": { "type": "number" },
+        "totalCarbs": { "type": "number" },
+        "totalFats": { "type": "number" }
+      },
+      "required": ["userId", "name", "ingredients"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "coaches/{coachId}": {
+      "schema": "Coach",
+      "description": "Coach profile documents"
+    },
+    "users/{userId}/dailyLogs/{logId}": {
+      "schema": "DailyLog",
+      "description": "User's daily health logs"
+    },
+    "users/{userId}/inBodyLogs/{logId}": {
+      "schema": "InBodyLog",
+      "description": "User's InBody measurement history"
+    },
+    "users/{userId}/plans/{planId}": {
+      "schema": { "$ref": "WorkoutPlan" },
+      "description": "User's personalized plans (workout or nutrition)"
+    },
+    "users/{userId}/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "User's saved recipes"
+    }
+  }
+}

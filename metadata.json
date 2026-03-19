@@ -1,0 +1,5 @@
+{
+  "name": "NABD",
+  "description": "A comprehensive health and fitness platform with an AI-powered recipe ingredient calculator, gram-based quantity adjustments, and nutritional analysis.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation", "fullscreen"]
+}
