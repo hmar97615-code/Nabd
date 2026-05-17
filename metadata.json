@@ -1,5 +1,5 @@
 {
-  "name": "NABD",
-  "description": "A comprehensive health and fitness platform with an AI-powered recipe ingredient calculator, gram-based quantity adjustments, and nutritional analysis.",
+  "name": "NABD: Holistic Health Decoded",
+  "description": "A psychology-driven health platform that integrates AI-powered nutrition tracking, expert coaching, and holistic data analysis to empower users in their wellness journey.",
   "requestFramePermissions": ["camera", "microphone", "geolocation", "fullscreen"]
 }

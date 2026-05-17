@@ -45,9 +45,39 @@ service cloud.firestore {
         allow read, write: if isOwner(userId) || isAdmin();
       }
 
+      // Manual Training Plans
+      match /manualPlans/{planId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
       // Recipes
       match /recipes/{recipeId} {
         allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Chat History
+      match /chatHistory/{chatId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Achievements
+      match /achievements/{achId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Stats
+      match /stats/{statId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Habits
+      match /habits/{habitId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+        
+        // Completions
+        match /completions/{completionId} {
+          allow read, write: if isOwner(userId) || isAdmin();
+        }
       }
     }
 
@@ -55,6 +85,11 @@ service cloud.firestore {
     match /coaches/{coachId} {
       allow read: if true; // Publicly viewable
       allow write: if isOwner(coachId) || isAdmin();
+    }
+
+    // Connectivity Test Rule
+    match /test/connection {
+      allow read: if true;
     }
   }
 }

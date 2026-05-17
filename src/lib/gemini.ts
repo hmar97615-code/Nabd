@@ -1,13 +1,16 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 
-const apiKey = process.env.USER_GEMINI_API_KEY || process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
-
-if (!apiKey) {
-  console.warn("Gemini API Key not found. AI features will be disabled. Please ensure GEMINI_API_KEY is set in the environment.");
-} else {
-  console.log("Gemini API Key loaded successfully.");
+/**
+ * Helper to get the Gemini API Key from the environment
+ */
+function getApiKey(): string {
+  if (typeof window !== 'undefined' && (window as any).__GEMINI_API_KEY__) {
+    return (window as any).__GEMINI_API_KEY__;
+  }
+  // Prefer process.env.GEMINI_API_KEY as per guidelines
+  // Also check for process.env.API_KEY which is injected for paid models
+  return process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.USER_GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
 }
-const ai = new GoogleGenAI({ apiKey: apiKey });
 
 /**
  * Helper to retry Gemini API calls with exponential backoff
@@ -23,12 +26,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
     } catch (error: any) {
       lastError = error;
       console.error(`AI call failed (attempt ${i + 1}/${maxRetries}):`, error);
-      if (error.response) {
-        console.error("Error response data:", await error.response.text().catch(() => "No text"));
-      }
-      if (error.details) {
-        console.error("Error details:", error.details);
-      }
+      
       // Check if it's a rate limit error (429)
       const isRateLimit = error?.message?.includes('429') || error?.status === 'RESOURCE_EXHAUSTED';
       if (isRateLimit && i < maxRetries - 1) {
@@ -67,8 +65,74 @@ function parseJSONResponse(text: string, fallback: any): any {
   }
 }
 
+export const analyzeInBodyScan = async (base64Image: string) => {
+  return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    const prompt = `
+      You are an expert fitness coach and nutritionist. Analyze this InBody scan image.
+      Extract the following data accurately from the image:
+      - Weight (in kg)
+      - Body Fat Percentage (%)
+      - Skeletal Muscle Mass (in kg)
+      
+      Then, provide a detailed analysis in English:
+      1. Fat Analysis: Identify where fat is concentrated based on the segmental fat analysis (if visible) or general principles, and provide specific advice on how to lose it.
+      2. Muscle Analysis: Identify weak muscle areas based on the segmental lean analysis and provide targeted exercises to improve them.
+      3. General Advice: Provide an overall assessment of the body composition and actionable steps to reach a healthy balance.
+      
+      Return the result in JSON format.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{
+        parts: [
+          {
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: base64Image,
+            },
+          },
+          { text: prompt },
+        ],
+      }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            weight: { type: Type.NUMBER, description: "Weight in kg" },
+            bodyFatPercentage: { type: Type.NUMBER, description: "Body Fat Percentage" },
+            skeletalMuscleMass: { type: Type.NUMBER, description: "Skeletal Muscle Mass in kg" },
+            fatAnalysis: { type: Type.STRING, description: "Advice on fat distribution and how to lose it" },
+            muscleAnalysis: { type: Type.STRING, description: "Advice on weak muscle areas" },
+            generalAdvice: { type: Type.STRING, description: "General information and solutions" },
+          },
+          required: ["weight", "bodyFatPercentage", "skeletalMuscleMass", "fatAnalysis", "muscleAnalysis", "generalAdvice"],
+        },
+      },
+    });
+
+    return parseJSONResponse(response.text || "{}", {
+      weight: 0,
+      bodyFatPercentage: 0,
+      skeletalMuscleMass: 0,
+      fatAnalysis: "Insufficient data found.",
+      muscleAnalysis: "Insufficient data found.",
+      generalAdvice: "Please ensure the scan image is clear."
+    });
+  });
+};
+
 export const analyzeFoodImage = async (base64Images: string[], mealName?: string, ingredients?: string) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
     const parts: any[] = base64Images.map(img => ({
       inlineData: {
         mimeType: "image/jpeg",
@@ -93,7 +157,7 @@ export const analyzeFoodImage = async (base64Images: string[], mealName?: string
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts },
+      contents: [{ parts }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -126,8 +190,12 @@ export const analyzeFoodImage = async (base64Images: string[], mealName?: string
   });
 };
 
-export const scanNutritionLabel = async (base64Images: string[]) => {
+export const scanNutritionLabel = async (base64Images: string[], barcode?: string, productName?: string) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
     const parts: any[] = base64Images.map(img => ({
       inlineData: {
         mimeType: "image/jpeg",
@@ -135,42 +203,54 @@ export const scanNutritionLabel = async (base64Images: string[]) => {
       },
     }));
 
-    const prompt = "Extract the nutritional information from this nutrition facts label. Identify the product name, calories, protein, carbs, and fats per serving or per 100g. Return as JSON: {name, calories, protein, carbs, fats}. Use Arabic for the name if possible.";
+    let prompt = "You are a nutrition expert. ";
+    if (base64Images.length > 0) {
+      prompt += "Extract the nutritional information from this nutrition facts label. ";
+    } else {
+      prompt += "Provide the nutritional information for the product based on the following details. ";
+    }
+    prompt += "Identify the product name, calories, protein, carbs, and fats per serving or per 100g.";
+    
+    if (barcode) prompt += ` The product barcode is: ${barcode}.`;
+    if (productName) prompt += ` The product name is: ${productName}.`;
+    
+    prompt += " IMPORTANT: Use the Google Search tool to look up the exact product matching the barcode or name to ensure the nutritional values are precise. Search for the barcode on sites like OpenFoodFacts, MyFitnessPal, or FatSecret. Return ONLY a valid JSON object with the following keys: name (string), calories (number), protein (number), carbs (number), fats (number). Do not include any other text or markdown formatting.";
+    
     parts.push({ text: prompt });
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts },
+      model: "gemini-3.1-pro-preview",
+      contents: [{ parts }],
       config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            calories: { type: Type.NUMBER },
-            protein: { type: Type.NUMBER },
-            carbs: { type: Type.NUMBER },
-            fats: { type: Type.NUMBER },
-          },
-          required: ["name", "calories", "protein", "carbs", "fats"],
-        },
+        tools: [{ googleSearch: {} }],
+        temperature: 0.1,
       },
     });
 
     const text = response.text || "{}";
-    return parseJSONResponse(text, {});
+    return parseJSONResponse(text, {
+      name: productName || barcode || "Unknown Product",
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fats: 0
+    });
   });
 };
 
 export const analyzeFoodText = async (mealName: string, ingredients?: string) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
     let prompt = `Analyze this meal: '${mealName}'.`;
     if (ingredients) prompt += ` Ingredients/weights provided: '${ingredients}'.`;
     prompt += " Estimate the calories, protein, carbs, and fats. Return the result in JSON format with fields: name, calories, protein, carbs, fats.";
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -205,6 +285,10 @@ export const analyzeFoodText = async (mealName: string, ingredients?: string) =>
 
 export const getMealIngredients = async (mealName: string, totalWeight?: number, base64Images?: string[]) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
     const parts: any[] = [];
     
     if (base64Images && base64Images.length > 0) {
@@ -227,7 +311,7 @@ export const getMealIngredients = async (mealName: string, totalWeight?: number,
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts },
+      contents: [{ parts }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -249,49 +333,77 @@ export const getMealIngredients = async (mealName: string, totalWeight?: number,
   });
 };
 
-export const generateNutritionPlan = async (userData: any, targetCalories: number) => {
+export const generateNutritionPlan = async (userData: any, targetCalories: number, targetMacros: { protein: number, carbs: number, fats: number }) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    const currentDate = new Date().toLocaleString('en-US', { timeZoneName: 'short' });
     const prompt = `Based on the following user data, generate a personalized daily nutrition plan for one day.
+    Current Date and Time: ${currentDate}
+    
     User Data: ${JSON.stringify(userData)}
     Target Daily Calories: ${targetCalories} kcal.
+    Target Macros: Protein ${targetMacros.protein}g, Carbs ${targetMacros.carbs}g, Fats ${targetMacros.fats}g.
+    
+    Selected Sports and Goals: ${JSON.stringify(userData.selectedSports || [])}
+    
+    CRITICAL HEALTH INSTRUCTION:
+    Pay close attention to the user's health condition (healthStatus: ${userData.healthStatus || 'None/Healthy'}). 
+    If they have a condition like diabetes, hypertension, etc., the diet MUST be strictly tailored to be safe and beneficial for that condition (e.g., low glycemic index for diabetics).
+    Provide a 'healthAdvice' string field with specific nutritional advice related to their health condition.
+    
     The plan should include Breakfast, Lunch, Dinner, and 2 Snacks.
-    For each meal, provide: name, estimated calories, macros (protein, carbs, fats in grams), and a brief description.
+    For each meal, provide: name, estimated calories, macros (protein, carbs, fats in grams), a brief description, a list of ingredients with their exact weights (e.g., '150g Chicken Breast'), and the preparation method.
     Make sure the sum of calories across all meals equals exactly ${targetCalories} kcal.
-    Return as a JSON array of meal objects.`;
+    Return as a JSON object with fields: healthAdvice (string) and meals (array of meal objects).`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              mealType: { type: Type.STRING },
-              name: { type: Type.STRING },
-              calories: { type: Type.NUMBER },
-              description: { type: Type.STRING },
-              protein: { type: Type.NUMBER },
-              carbs: { type: Type.NUMBER },
-              fats: { type: Type.NUMBER },
-            },
-            required: ["mealType", "name", "calories", "description", "protein", "carbs", "fats"],
+          type: Type.OBJECT,
+          properties: {
+            healthAdvice: { type: Type.STRING },
+            meals: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  mealType: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                  calories: { type: Type.NUMBER },
+                  description: { type: Type.STRING },
+                  protein: { type: Type.NUMBER },
+                  carbs: { type: Type.NUMBER },
+                  fats: { type: Type.NUMBER },
+                  ingredients: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  preparation: { type: Type.STRING }
+                },
+                required: ["mealType", "name", "calories", "description", "protein", "carbs", "fats", "ingredients", "preparation"],
+              },
+            }
           },
+          required: ["healthAdvice", "meals"]
         },
       },
     });
 
-    const text = response.text || "[]";
-    const meals = parseJSONResponse(text, []);
+    const text = response.text || "{}";
+    const result = parseJSONResponse(text, { healthAdvice: "", meals: [] });
+    const meals = result.meals || [];
     
     // Post-processing to ensure exact calorie and macro match
     if (meals && meals.length > 0) {
-      // Use a 30/40/30 macro split for the daily target
-      const targetP = Math.round((targetCalories * 0.3) / 4);
-      const targetC = Math.round((targetCalories * 0.4) / 4);
-      const targetF = Math.round((targetCalories * 0.3) / 9);
+      const targetP = targetMacros.protein;
+      const targetC = targetMacros.carbs;
+      const targetF = targetMacros.fats;
       
       let remainingP = targetP;
       let remainingC = targetC;
@@ -320,46 +432,108 @@ export const generateNutritionPlan = async (userData: any, targetCalories: numbe
         meal.calories = (meal.protein * 4) + (meal.carbs * 4) + (meal.fats * 9);
       });
     }
-    return meals;
+    return { meals, healthAdvice: result.healthAdvice };
   });
 };
 
-export const chatWithHealthAssistant = async (message: string, history: any[]) => {
+export const chatWithHealthAssistant = async (message: string, history: any[], userProfile?: any, recentActivity?: any) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    let profileContext = "";
+    if (userProfile) {
+      profileContext = `
+User Profile Context:
+- Name: ${userProfile.name || 'Unknown'}
+- Age: ${userProfile.age || 'Unknown'}
+- Gender: ${userProfile.gender || 'Unknown'}
+- Height: ${userProfile.height || 'Unknown'} cm
+- Weight: ${userProfile.weight || 'Unknown'} kg
+- Goal: ${userProfile.goal || 'Unknown'}
+- Activity Level: ${userProfile.activityLevel || 'Unknown'}
+- Fitness Level: ${userProfile.fitnessLevel || 'Unknown'}
+- Health Status/Injuries: ${userProfile.healthStatus || 'None'}
+- Daily Calorie Target: ${userProfile.tdee || 'Unknown'} kcal
+- Macros: Protein ${userProfile.macros?.protein || 0}g, Carbs ${userProfile.macros?.carbs || 0}g, Fats ${userProfile.macros?.fats || 0}g
+`;
+    }
+
+    let activityContext = "";
+    if (recentActivity) {
+      activityContext = `
+Recent Activity (Last few days):
+${JSON.stringify(recentActivity, null, 2)}
+`;
+    }
+
+    let historyContext = "";
+    if (history && history.length > 0) {
+      historyContext = "Previous Conversation History:\n" + history.map(h => `${h.role === 'user' ? 'User' : 'NABD'}: ${h.text}`).join('\n') + "\n\n";
+    }
+
+    const currentDate = new Date().toLocaleString('en-US', { timeZoneName: 'short' });
+    const systemInstruction = `You are NABD (نبض), a friendly, informal health and fitness assistant. You are like a close friend or peer to the user. 
+    
+    Current Date and Time: ${currentDate}
+    
+    CRITICAL TONE INSTRUCTION:
+    - Speak informally and casually, like a best friend.
+    - IMPORTANT: Replace standard punctuation (periods, commas, etc.) with tildes (~) to sound more relaxed and friendly. 
+    - Use emojis frequently to express emotion and friendliness.
+    - Be supportive, encouraging, and sometimes a bit playful.
+
+    CRITICAL LANGUAGE INSTRUCTION: 
+    - You MUST detect the language and dialect the user is using (e.g., English, Formal Arabic, Egyptian Arabic, etc.).
+    - You MUST respond in the SAME language and dialect as the user.
+    - If the user speaks in Egyptian Arabic (Ammiya), respond in friendly, informal Egyptian Arabic.
+    - If the user speaks in English, respond in friendly, informal English.
+
+    ${profileContext}
+    ${activityContext}
+
+    Use the user's profile context and recent activity (workouts, meals) to provide personalized, context-aware answers. If they ask "What did I eat yesterday?" or "How was my workout?", refer to the provided activity data.`;
+
     const chat = ai.chats.create({
       model: "gemini-3-flash-preview",
       config: {
-        systemInstruction: "You are NABD (نبض), a professional health and fitness assistant. You provide evidence-based advice on nutrition, exercise, and wellness. Always be encouraging and professional. Use Arabic if the user speaks Arabic, otherwise English.",
+        systemInstruction: systemInstruction,
       },
     });
 
-    const response = await chat.sendMessage({ message });
+    const fullMessage = `${historyContext}Current Message: ${message}`;
+    const response = await chat.sendMessage({ message: fullMessage });
     return response.text;
   });
 };
 
 export const analyzeExerciseForm = async (base64Image: string, exerciseName: string, tutorialVideoUrl?: string) => {
   return withRetry(async () => {
-    const parts: any[] = [
-      {
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: base64Image,
-        },
-      },
-      {
-        text: `Analyze the user's form for the exercise: ${exerciseName}. 
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    const prompt = `Analyze the user's form for the exercise: ${exerciseName}. 
         ${tutorialVideoUrl ? `The user is following this tutorial: ${tutorialVideoUrl}. Compare their form against the standard technique shown in such tutorials.` : ''}
         Identify if the form is correct or incorrect. 
         Provide specific feedback on what to improve or maintain. 
         Also, mention any potential injury risks if the form is wrong.
-        Return the result in JSON format with fields: isCorrect (boolean), feedback (string), injuryRisk (string).`
-      }
-    ];
+        Return the result in JSON format with fields: isCorrect (boolean), feedback (string), injuryRisk (string).`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts },
+      contents: [{
+        parts: [
+          {
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: base64Image,
+            },
+          },
+          { text: prompt },
+        ],
+      }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -375,23 +549,32 @@ export const analyzeExerciseForm = async (base64Image: string, exerciseName: str
     });
 
     const text = response.text || "{}";
-    return parseJSONResponse(text, {});
+    return parseJSONResponse(text, {
+      isCorrect: false,
+      feedback: "Could not analyze form. Please ensure the image is clear.",
+      injuryRisk: "Unknown"
+    });
   });
 };
 
-export const replaceMeal = async (currentMeal: any, targetCalories: number, userConstraints: string) => {
+export const replaceMeal = async (currentMeal: any, targetCalories: number, userConstraints: string, targetMacros?: { protein: number, carbs: number, fats: number }) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
     const prompt = `I need to replace a meal in a daily nutrition plan.
     Current Meal: ${JSON.stringify(currentMeal)}
     Target Calories: ${targetCalories} kcal (Must be exactly or very close to this).
+    ${targetMacros ? `Target Macros: Protein ${targetMacros.protein}g, Carbs ${targetMacros.carbs}g, Fats ${targetMacros.fats}g (Must match exactly).` : ''}
     User Constraints/Preferences: "${userConstraints}" (e.g., cheap, delicious, fast to make).
     
-    Based on scientific nutrition principles, provide a new meal that meets these constraints and matches the target calories.
-    Return as a JSON object with fields: mealType, name, calories, description, protein, carbs, fats.`;
+    Based on scientific nutrition principles, provide a new meal that meets these constraints and matches the target calories and macros.
+    Return as a JSON object with fields: mealType, name, calories, description, protein, carbs, fats, ingredients (array of strings with exact weights), and preparation (string).`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -404,8 +587,13 @@ export const replaceMeal = async (currentMeal: any, targetCalories: number, user
             protein: { type: Type.NUMBER },
             carbs: { type: Type.NUMBER },
             fats: { type: Type.NUMBER },
+            ingredients: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            },
+            preparation: { type: Type.STRING }
           },
-          required: ["mealType", "name", "calories", "description", "protein", "carbs", "fats"],
+          required: ["mealType", "name", "calories", "description", "protein", "carbs", "fats", "ingredients", "preparation"],
         },
       },
     });
@@ -414,14 +602,20 @@ export const replaceMeal = async (currentMeal: any, targetCalories: number, user
     const newMeal = parseJSONResponse(text, {});
     
     if (newMeal) {
-      const originalMacroCals = ((newMeal.protein || 0) * 4) + ((newMeal.carbs || 0) * 4) + ((newMeal.fats || 0) * 9) || 1;
-      const pRatio = ((newMeal.protein || 0) * 4) / originalMacroCals;
-      const cRatio = ((newMeal.carbs || 0) * 4) / originalMacroCals;
-      const fRatio = ((newMeal.fats || 0) * 9) / originalMacroCals;
+      if (targetMacros) {
+        newMeal.protein = targetMacros.protein;
+        newMeal.carbs = targetMacros.carbs;
+        newMeal.fats = targetMacros.fats;
+      } else {
+        const originalMacroCals = ((newMeal.protein || 0) * 4) + ((newMeal.carbs || 0) * 4) + ((newMeal.fats || 0) * 9) || 1;
+        const pRatio = ((newMeal.protein || 0) * 4) / originalMacroCals;
+        const cRatio = ((newMeal.carbs || 0) * 4) / originalMacroCals;
+        const fRatio = ((newMeal.fats || 0) * 9) / originalMacroCals;
 
-      newMeal.protein = Math.round((targetCalories * pRatio) / 4);
-      newMeal.carbs = Math.round((targetCalories * cRatio) / 4);
-      newMeal.fats = Math.round((targetCalories * fRatio) / 9);
+        newMeal.protein = Math.round((targetCalories * pRatio) / 4);
+        newMeal.carbs = Math.round((targetCalories * cRatio) / 4);
+        newMeal.fats = Math.round((targetCalories * fRatio) / 9);
+      }
       
       // Exact calorie calculation based on macros
       newMeal.calories = (newMeal.protein * 4) + (newMeal.carbs * 4) + (newMeal.fats * 9);
@@ -432,9 +626,23 @@ export const replaceMeal = async (currentMeal: any, targetCalories: number, user
 
 export const generateWorkoutPlan = async (userData: any, intensity: string = 'Moderate') => {
   return withRetry(async () => {
-    const prompt = `Based on the following user data, generate a comprehensive weekly workout plan grounded in sports science and the latest kinesiology research.
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    const currentDate = new Date().toLocaleString('en-US', { timeZoneName: 'short' });
+    const prompt = `Based on the following user data, generate a personalized weekly workout plan grounded in sports science and the latest kinesiology research.
+    Current Date and Time: ${currentDate}
+    
     User Data: ${JSON.stringify(userData)}
     Target Intensity: ${intensity}
+    
+    Selected Sports and Goals: ${JSON.stringify(userData.selectedSports || [])}
+    
+    CRITICAL HEALTH INSTRUCTION:
+    Pay close attention to the user's health condition (healthStatus: ${userData.healthStatus || 'None/Healthy'}). 
+    If they have a condition like diabetes, hypertension, joint issues, etc., the workout MUST be strictly tailored to be safe and beneficial for that condition.
+    Provide a 'healthAdvice' string field with specific exercise advice and precautions related to their health condition.
     
     Requirements:
     1. Tailor the plan to their specific goals (e.g., hypertrophy, strength, endurance), selected sports, and fitness level (${userData.fitnessLevel || 'intermediate'}).
@@ -445,17 +653,18 @@ export const generateWorkoutPlan = async (userData: any, intensity: string = 'Mo
     6. Write a "Scientific Basis" paragraph explaining the physiological reasoning behind this specific plan (e.g., muscle protein synthesis, metabolic stress, or neural adaptations).
     7. Include a videoUrl for each exercise (can be a placeholder like 'https://example.com/video.mp4' if a real one isn't known, but try to use real YouTube search URLs like 'https://www.youtube.com/results?search_query=exercise+name').
     
-    Return as a JSON object with fields: planTitle (string), weeklySchedule (array of objects with day, exercises), injuryPreventionTips (array of strings), scientificBasis (string).`;
+    Return as a JSON object with fields: planTitle (string), weeklySchedule (array of objects with day, exercises), injuryPreventionTips (array of strings), scientificBasis (string), healthAdvice (string).`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             planTitle: { type: Type.STRING },
+            healthAdvice: { type: Type.STRING },
             weeklySchedule: {
               type: Type.ARRAY,
               items: {
@@ -486,7 +695,7 @@ export const generateWorkoutPlan = async (userData: any, intensity: string = 'Mo
             },
             scientificBasis: { type: Type.STRING }
           },
-          required: ["planTitle", "weeklySchedule", "injuryPreventionTips", "scientificBasis"]
+          required: ["planTitle", "weeklySchedule", "injuryPreventionTips", "scientificBasis", "healthAdvice"]
         }
       }
     });
@@ -496,13 +705,77 @@ export const generateWorkoutPlan = async (userData: any, intensity: string = 'Mo
   });
 };
 
+export const analyzeWorkoutSession = async (workoutData: any, userHistory: any[], language: string = 'en') => {
+  return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    const prompt = `You are an elite fitness coach and sports scientist. Analyze this just-completed workout session.
+    
+    Language: Respond in ${language === 'ar' ? 'informal, encouraging Egyptian Arabic (Ammiya)' : 'informal, encouraging English'}.
+    
+    Completed Workout: ${JSON.stringify(workoutData)}
+    User's Past Workouts (for comparison): ${JSON.stringify(userHistory.slice(0, 5))}
+    
+    Requirements:
+    1. Identify any Personal Records (PRs) or improvements (e.g., lifted heavier, more reps, more volume) compared to past workouts.
+    2. Provide 'pros' (what went well, strengths).
+    3. Provide 'cons' (areas for improvement, e.g., low volume on a specific muscle, unbalanced workout).
+    4. Provide 'tips' (actionable advice for the next session).
+    5. Provide an 'encouragingMessage' celebrating their effort, specifically mentioning if they broke a record or lifted heavier.
+    
+    Return as a JSON object with fields:
+    - pros (array of strings)
+    - cons (array of strings)
+    - tips (array of strings)
+    - encouragingMessage (string)
+    - prsBroken (array of strings, e.g., "Bench Press: 80kg x 8 (New PR!)")`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            pros: { type: Type.ARRAY, items: { type: Type.STRING } },
+            cons: { type: Type.ARRAY, items: { type: Type.STRING } },
+            tips: { type: Type.ARRAY, items: { type: Type.STRING } },
+            encouragingMessage: { type: Type.STRING },
+            prsBroken: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ["pros", "cons", "tips", "encouragingMessage", "prsBroken"]
+        }
+      }
+    });
+
+    const text = response.text || "{}";
+    return parseJSONResponse(text, {
+      pros: [], cons: [], tips: [], encouragingMessage: "Great job!", prsBroken: []
+    });
+  });
+};
+
 export const analyzeHealthData = async (metrics: any, userData: any, history: any[] = []) => {
   return withRetry(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API Key not found.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    const currentDate = new Date().toLocaleString('en-US', { timeZoneName: 'short' });
     const prompt = `You are a world-class health scientist and medical AI assistant. Analyze the following health data and provide personalized, evidence-based insights.
+    
+    Current Date and Time: ${currentDate}
     
     Current Metrics: ${JSON.stringify(metrics)}
     User Profile: ${JSON.stringify(userData)}
     User History (Last 7 days): ${JSON.stringify(history)}
+    
+    CRITICAL HEALTH INSTRUCTION:
+    Pay close attention to the user's health condition (healthStatus: ${userData.healthStatus || 'None/Healthy'}). 
+    If they have a condition like diabetes, hypertension, etc., your analysis and recommendations MUST be strictly tailored to be safe and beneficial for that condition.
     
     Requirements:
     1. Analyze Trends: Compare current metrics with the history to identify significant changes or patterns.
@@ -518,11 +791,11 @@ export const analyzeHealthData = async (metrics: any, userData: any, history: an
     - insights: An array of strings highlighting interesting patterns found in their history (e.g., "Your heart rate is 5% lower on days you exercise").
     - recommendations: An array of strings for lifestyle changes.
     
-    Ensure the tone is professional, scientific, yet encouraging. Use Arabic as the primary language for the response content.`;
+    Ensure the tone is professional, scientific, yet encouraging. Use English as the primary language for the response content.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -553,7 +826,7 @@ export const analyzeHealthData = async (metrics: any, userData: any, history: an
 
     const text = response.text || "{}";
     return parseJSONResponse(text, { 
-      statusSummary: "عذراً، لم نتمكن من تحليل البيانات حالياً.", 
+      statusSummary: "Sorry, we couldn't analyze the data at the moment.", 
       guidance: [], 
       warnings: [], 
       insights: [], 

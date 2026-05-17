@@ -33,6 +33,11 @@
             }
           }
         },
+        "targetCalories": { "type": "number" },
+        "credits": { "type": "number" },
+        "subscriptionType": { "type": "string", "enum": ["free", "monthly", "quarterly", "semi_annual", "annual"] },
+        "subscriptionExpiry": { "type": "string", "format": "date-time" },
+        "lastDailyReward": { "type": "string", "format": "date" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "role"]
@@ -185,6 +190,74 @@
         "totalFats": { "type": "number" }
       },
       "required": ["userId", "name", "ingredients"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A single message in the chat history",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "ai"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["role", "text", "timestamp"]
+    },
+    "AchievementStats": {
+      "title": "Achievement Stats",
+      "description": "List of unlocked achievements",
+      "type": "object",
+      "properties": {
+        "list": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "unlockedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "FitnessStats": {
+      "title": "Fitness Stats",
+      "description": "Aggregated fitness statistics and records",
+      "type": "object",
+      "properties": {
+        "totalWorkouts": { "type": "number" },
+        "totalVolume": { "type": "number" },
+        "lastWorkoutDate": { "type": "string", "format": "date" },
+        "currentStreak": { "type": "number" },
+        "bestVolume": { "type": "number" },
+        "bestReps": { "type": "number" },
+        "bestWeight": { "type": "number" }
+      }
+    },
+    "Habit": {
+      "title": "Habit",
+      "description": "A habit the user wants to track",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "goal": { "type": "number" },
+        "frequency": { "type": "string", "enum": ["daily", "weekly"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "frequency"]
+    },
+    "HabitCompletion": {
+      "title": "Habit Completion",
+      "description": "A log entry for a completed habit",
+      "type": "object",
+      "properties": {
+        "habitId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "value": { "type": "number" }
+      },
+      "required": ["habitId", "date", "value"]
     }
   },
   "firestore": {
@@ -211,6 +284,26 @@
     "users/{userId}/recipes/{recipeId}": {
       "schema": "Recipe",
       "description": "User's saved recipes"
+    },
+    "users/{userId}/chatHistory/{chatId}": {
+      "schema": "ChatMessage",
+      "description": "User's chat history with the assistant"
+    },
+    "users/{userId}/achievements/{achId}": {
+      "schema": "AchievementStats",
+      "description": "User's achievement progress"
+    },
+    "users/{userId}/stats/{statId}": {
+      "schema": "FitnessStats",
+      "description": "User's fitness statistics and personal records"
+    },
+    "users/{userId}/habits/{habitId}": {
+      "schema": "Habit",
+      "description": "User's defined habits"
+    },
+    "users/{userId}/habits/{habitId}/completions/{completionId}": {
+      "schema": "HabitCompletion",
+      "description": "Completions for a specific habit"
     }
   }
 }

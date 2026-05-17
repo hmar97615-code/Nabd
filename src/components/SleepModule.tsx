@@ -98,6 +98,7 @@ export default function SleepModule({ user }: { user: any }) {
       const today = new Date().toISOString().split('T')[0];
       const duration = (sleepHours * 60) + sleepMinutes;
       await setDoc(doc(db, 'users', user.uid, 'dailyLogs', today), {
+        date: today,
         sleepDuration: duration,
         sleepQuality: sleepQuality,
         lastSync: new Date().toISOString()
@@ -106,7 +107,7 @@ export default function SleepModule({ user }: { user: any }) {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
-      setError('فشل حفظ بيانات النوم');
+      setError('Failed to save sleep data');
     } finally {
       setIsSavingSleep(false);
     }
@@ -124,13 +125,13 @@ export default function SleepModule({ user }: { user: any }) {
       
       [6, 5, 4].forEach(cycles => {
         const sleepDate = new Date(wakeDate.getTime() - (cycles * cycleMinutes + fallAsleepMinutes) * 60000);
-        results.push(sleepDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }));
+        results.push(sleepDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }));
       });
     } else {
       const now = new Date();
       [6, 5, 4].forEach(cycles => {
         const wakeDate = new Date(now.getTime() + (cycles * cycleMinutes + fallAsleepMinutes) * 60000);
-        results.push(wakeDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }));
+        results.push(wakeDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }));
       });
     }
     setCalcResults(results);
@@ -144,8 +145,8 @@ export default function SleepModule({ user }: { user: any }) {
     >
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">تتبع النوم</h1>
-          <p className="text-slate-500">سجل جودة نومك واستخدم الحاسبة الذكية لتحسين دورتك البيولوجية.</p>
+          <h1 className="text-3xl font-bold text-slate-900">Sleep Tracking</h1>
+          <p className="text-slate-500">Track your sleep quality and use the smart calculator to optimize your biological cycle.</p>
         </div>
       </div>
 
@@ -159,7 +160,7 @@ export default function SleepModule({ user }: { user: any }) {
       {success && (
         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-3 text-emerald-700">
           <CheckCircle2 size={20} />
-          <p className="text-sm font-medium">تم حفظ بيانات النوم بنجاح!</p>
+          <p className="text-sm font-medium">Sleep data saved successfully!</p>
         </div>
       )}
 
@@ -169,13 +170,13 @@ export default function SleepModule({ user }: { user: any }) {
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <Moon className="text-indigo-300" size={20} />
-                <span className="text-xs font-bold uppercase tracking-widest text-indigo-300">Recovery Protocol / بروتوكول الاستشفاء</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-indigo-300">Recovery Protocol</span>
               </div>
-              <h2 className="text-2xl font-bold mb-1">Sleep Recommendation / توصيات النوم</h2>
+              <h2 className="text-2xl font-bold mb-1">Sleep Recommendation</h2>
               <p className="text-indigo-200 text-sm">{planDetails.recovery.notes}</p>
             </div>
             <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 text-center min-w-[140px]">
-              <p className="text-[10px] font-bold text-indigo-300 uppercase mb-1">Target Duration / المدة المستهدفة</p>
+              <p className="text-[10px] font-bold text-indigo-300 uppercase mb-1">Target Duration</p>
               <p className="text-2xl font-bold">{planDetails.recovery.sleepHours} <span className="text-xs font-medium text-indigo-300">hours</span></p>
             </div>
           </div>
@@ -187,13 +188,13 @@ export default function SleepModule({ user }: { user: any }) {
         <Card className="p-8">
           <h3 className="text-xl font-bold text-slate-900 mb-8 flex items-center gap-2">
             <Moon className="text-indigo-600" size={24} />
-            تسجيل النوم اليومي
+            Daily Sleep Log
           </h3>
           
-          <div className="space-y-6 text-right" dir="rtl">
+          <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600">ساعات النوم</label>
+                <label className="text-sm font-bold text-slate-600">Sleep Hours</label>
                 <input 
                   type="number" 
                   value={sleepHours}
@@ -203,7 +204,7 @@ export default function SleepModule({ user }: { user: any }) {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600">الدقائق</label>
+                <label className="text-sm font-bold text-slate-600">Minutes</label>
                 <input 
                   type="number" 
                   value={sleepMinutes}
@@ -215,7 +216,7 @@ export default function SleepModule({ user }: { user: any }) {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-600">جودة النوم</label>
+              <label className="text-sm font-bold text-slate-600">Sleep Quality</label>
               <div className="grid grid-cols-4 gap-2">
                 {['poor', 'fair', 'good', 'excellent'].map((q) => (
                   <button
@@ -228,14 +229,14 @@ export default function SleepModule({ user }: { user: any }) {
                         : "bg-white text-slate-500 border-slate-200 hover:border-indigo-200"
                     )}
                   >
-                    {q === 'poor' ? 'سيء' : q === 'fair' ? 'مقبول' : q === 'good' ? 'جيد' : 'ممتاز'}
+                    {q === 'poor' ? 'Poor' : q === 'fair' ? 'Fair' : q === 'good' ? 'Good' : 'Excellent'}
                   </button>
                 ))}
               </div>
             </div>
 
             <Button onClick={saveSleepLog} disabled={isSavingSleep} className="w-full py-4 text-lg">
-              {isSavingSleep ? 'جاري الحفظ...' : 'حفظ السجل'}
+              {isSavingSleep ? 'Saving...' : 'Save Log'}
             </Button>
           </div>
         </Card>
@@ -243,29 +244,29 @@ export default function SleepModule({ user }: { user: any }) {
         <Card className="p-8">
           <h4 className="font-bold text-xl text-slate-900 mb-8 flex items-center gap-2">
             <Clock size={24} className="text-indigo-600" />
-            حاسبة النوم الذكية
+            Smart Sleep Calculator
           </h4>
           
-          <div className="space-y-6 text-right" dir="rtl">
+          <div className="space-y-6">
             <div className="p-6 bg-indigo-50 rounded-3xl space-y-6">
               <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-sm">
                 <button 
                   onClick={() => setCalcMode('wake')}
                   className={cn("flex-1 py-3 rounded-xl text-sm font-bold transition-all", calcMode === 'wake' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50")}
                 >
-                  أريد الاستيقاظ في
+                  I want to wake up at
                 </button>
                 <button 
                   onClick={() => setCalcMode('sleep')}
                   className={cn("flex-1 py-3 rounded-xl text-sm font-bold transition-all", calcMode === 'sleep' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50")}
                 >
-                  سأنام الآن
+                  I will sleep now
                 </button>
               </div>
 
               {calcMode === 'wake' && (
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-indigo-900 uppercase tracking-wider">وقت الاستيقاظ المستهدف</label>
+                  <label className="text-xs font-bold text-indigo-900 uppercase tracking-wider">Target Wake-up Time</label>
                   <input 
                     type="time" 
                     value={targetTime}
@@ -276,7 +277,7 @@ export default function SleepModule({ user }: { user: any }) {
               )}
 
               <Button onClick={calculateSleep} variant="outline" className="w-full bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50 py-4">
-                احسب المواعيد المثالية
+                Calculate Ideal Times
               </Button>
 
               <AnimatePresence>
@@ -287,20 +288,20 @@ export default function SleepModule({ user }: { user: any }) {
                     className="space-y-4 pt-4 border-t border-indigo-100"
                   >
                     <p className="text-sm text-indigo-800 font-bold text-center">
-                      {calcMode === 'wake' ? 'للاستيقاظ نشيطاً، يجب أن تنام في:' : 'للاستيقاظ نشيطاً، يجب أن تستيقظ في:'}
+                      {calcMode === 'wake' ? 'To wake up refreshed, you should sleep at:' : 'To wake up refreshed, you should wake up at:'}
                     </p>
                     <div className="grid grid-cols-3 gap-3">
                       {calcResults.map((time, i) => (
                         <div key={i} className="bg-white p-4 rounded-2xl text-center shadow-sm border border-indigo-100 group hover:border-indigo-400 transition-colors">
                           <p className="text-lg font-bold text-indigo-600">{time}</p>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase">{6-i} دورات نوم</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{6-i} sleep cycles</p>
                         </div>
                       ))}
                     </div>
                     <div className="p-4 bg-white/50 rounded-2xl flex gap-3 items-start">
                       <Info size={16} className="text-indigo-600 shrink-0 mt-0.5" />
                       <p className="text-[11px] text-indigo-700 leading-relaxed">
-                        تعتمد هذه الحسابات على دورات النوم الطبيعية (90 دقيقة) وتفترض 15 دقيقة للاستغراق في النوم. الاستيقاظ في نهاية الدورة يجعلك تشعر بنشاط أكبر.
+                        These calculations are based on natural sleep cycles (90 minutes) and assume 15 minutes to fall asleep. Waking up at the end of a cycle makes you feel more refreshed.
                       </p>
                     </div>
                   </motion.div>
@@ -314,17 +315,17 @@ export default function SleepModule({ user }: { user: any }) {
       <Card className="p-8">
         <h3 className="text-xl font-bold text-slate-900 mb-8 flex items-center gap-2">
           <TrendingUp className="text-indigo-600" size={24} />
-          سجل النوم الأخير
+          Recent Sleep Logs
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {history.length > 0 ? history.map((log, i) => (
             <div key={i} className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-              <p className="text-xs font-bold text-slate-400 mb-2">{new Date(log.date).toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'short' })}</p>
+              <p className="text-xs font-bold text-slate-400 mb-2">{new Date(log.date).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })}</p>
               <div className="flex items-baseline gap-1">
                 <span className="text-xl font-bold text-slate-900">{Math.floor(log.sleepDuration / 60)}</span>
-                <span className="text-xs text-slate-500">ساعة</span>
+                <span className="text-xs text-slate-500">hours</span>
                 <span className="text-xl font-bold text-slate-900 ml-1">{log.sleepDuration % 60}</span>
-                <span className="text-xs text-slate-500">دقيقة</span>
+                <span className="text-xs text-slate-500">min</span>
               </div>
               <div className="mt-2">
                 <span className={cn(
@@ -333,14 +334,14 @@ export default function SleepModule({ user }: { user: any }) {
                   log.sleepQuality === 'good' ? "bg-blue-100 text-blue-700" :
                   log.sleepQuality === 'fair' ? "bg-orange-100 text-orange-700" : "bg-red-100 text-red-700"
                 )}>
-                  {log.sleepQuality === 'poor' ? 'سيء' : log.sleepQuality === 'fair' ? 'مقبول' : log.sleepQuality === 'good' ? 'جيد' : 'ممتاز'}
+                  {log.sleepQuality === 'poor' ? 'Poor' : log.sleepQuality === 'fair' ? 'Fair' : log.sleepQuality === 'good' ? 'Good' : 'Excellent'}
                 </span>
               </div>
             </div>
           )) : (
             <div className="col-span-full text-center py-12 text-slate-400">
               <Bed size={48} className="mx-auto mb-4 opacity-20" />
-              <p>لا يوجد سجلات نوم سابقة.</p>
+              <p>No previous sleep logs found.</p>
             </div>
           )}
         </div>

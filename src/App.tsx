@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Activity, 
-  Apple, 
   Camera, 
   ChevronRight, 
   Heart, 
@@ -32,23 +31,38 @@ import {
   MonitorOff,
   Coffee,
   Wind,
-  Target
+  Target,
+  Share2,
+  Zap,
+  ShieldCheck,
+  Footprints,
+  Flame,
+  Timer,
+  Globe,
+  CreditCard,
+  Star,
+  Award,
+  Check
 } from 'lucide-react';
+import { toPng } from 'html-to-image';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, db, storage, googleProvider, OperationType, handleFirestoreError } from './firebase';
+import { auth, db, storage, OperationType, handleFirestoreError } from './firebase';
 import { calculatePlanDetails } from './lib/planUtils';
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, onSnapshot, query, orderBy, limit, addDoc, serverTimestamp, where, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 // Force cache bust: 2026-03-06
 import { chatWithHealthAssistant } from './lib/gemini';
 import SportsModule from './components/SportsModule';
 import NutritionModule from './components/NutritionModule';
+import InBodyScanner from './components/InBodyScanner';
 import AdminDashboard from './components/AdminDashboard';
 import SmartwatchModule from './components/SmartwatchModule';
 import SleepModule from './components/SleepModule';
 import PlansModule from './components/PlansModule';
 import TrainerDashboard from './components/TrainerDashboard';
+import HabitModule from './components/HabitModule';
+import { SubscriptionModule } from './components/SubscriptionModule';
 import { 
   LineChart, 
   Line, 
@@ -65,13 +79,9 @@ import {
   PieChart,
   Pie
 } from 'recharts';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import { Shield, Ban, Trash2, Eye, ExternalLink, Info } from 'lucide-react';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from './lib/utils';
+import { Shield, Ban, Trash2, Eye, ExternalLink, Info, Bell } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
 
 // --- Types ---
 interface UserProfile {
@@ -105,59 +115,70 @@ interface UserProfile {
   targetWeight?: number;
   targetDate?: string;
   targetCalories?: number;
+  credits?: number;
+  subscriptionType?: string;
+  subscriptionExpiry?: string;
+  subscriptionStartDate?: string;
+  lastResetDate?: string;
+  lastDailyReward?: string;
+  aiWorkoutPlan?: any;
+  aiNutritionPlan?: any;
+  notificationsEnabled?: boolean;
+  waterReminderInterval?: number; // in minutes
+  mealReminderEnabled?: boolean;
 }
 
-const SPORTS_DATA = [
+export const SPORTS_DATA = [
   {
     id: 'gym',
-    name: 'الجيم (Gym)',
+    name: 'Gym',
     icon: <Dumbbell size={20} />,
     goals: [
-      'تحسين الجهاز الدوري', 'خسارة الوزن', 'زيادة الوزن', 'ثبات الوزن', 
-      'زيادة القوه العضليه', 'زيادة قوة التحمل', 'تحسين التواصل العصبي العضلي', 
-      'تجنب الاصابات', 'تحسين اداء وتكنيك', 'حل مشكلة قصور في تطور بعض العضلات',
-      'Muscle Symmetry (تناسق العضلات)'
+      'Cardiovascular improvement', 'Weight loss', 'Weight gain', 'Weight maintenance', 
+      'Increase muscle strength', 'Increase endurance', 'Improve neuromuscular communication', 
+      'Injury prevention', 'Improve performance and technique', 'Solve muscle development plateaus',
+      'Muscle Symmetry'
     ]
   },
   {
     id: 'swimming',
-    name: 'السباحة (Swimming)',
+    name: 'Swimming',
     icon: <Activity size={20} />,
     goals: [
-      'تحسن زمن سباحه معينه', 'تحسين وزيادة النفس', 'تحسين الاداء في سباحه معينه', 
-      'زيادة قوة العضلات المستخدمه في سباحه معينه', 'تجنب الاصابات',
-      'Stroke Efficiency (كفاءة الشدة)'
+      'Improve specific swimming time', 'Improve and increase breath control', 'Improve performance in specific swimming styles', 
+      'Increase strength of muscles used in swimming', 'Injury prevention',
+      'Stroke Efficiency'
     ]
   },
   {
     id: 'fin_swimming',
-    name: 'السباحة بالزعانف (Fin Swimming)',
+    name: 'Fin Swimming',
     icon: <Activity size={20} className="rotate-45" />,
     goals: [
-      'تحسين زمن السباحه', 'تحسين النفس', 'تحسين الاداء والتكنيك', 
-      'زيادة قوة العضلات المستخدمه اثناء السباحه', 'تجنب الاصابات'
+      'Improve swimming time', 'Improve breath control', 'Improve performance and technique', 
+      'Increase strength of muscles used during swimming', 'Injury prevention'
     ]
   },
   {
     id: 'football',
-    name: 'كرة القدم (Football)',
+    name: 'Football',
     icon: <Activity size={20} />,
     goals: [
-      'تحسين الاداء والتكنيك لحركات معينه', 'المساعده في التطوير لمركز معين في الملعب', 
-      'تجنب الاصابات', 'زيادة قوة العضلات المستخدمه', 'تحسين النفس', 
-      'تحسين بعض المهارات التكتيكيه مثل الوعى و كشف الملعب و سرعة رد الفعل',
-      'Agility & Change of Direction (الرشاقة وتغيير الاتجاه)'
+      'Improve performance and technique for specific movements', 'Help in development for specific field positions', 
+      'Injury prevention', 'Increase strength of muscles used', 'Improve breath control', 
+      'Improve tactical skills like awareness, field vision, and reaction speed',
+      'Agility & Change of Direction'
     ]
   },
   {
     id: 'healthy_lifestyle',
-    name: 'الحياة الصحية (Healthy Lifestyle)',
+    name: 'Healthy Lifestyle',
     icon: <Heart size={20} />,
     goals: [
-      'تحسين الجهاز الدوري', 'تحسين الجهاز التنفسي', 
-      'تحسين العمليات الحيويه في الجسم مثل الهضم والنوم', 
-      'تجنب الامراض النفسيه مثل الاكتئاب والشعور بالوحده',
-      'Flexibility & Mobility (المرونة والحركية)'
+      'Cardiovascular improvement', 'Respiratory improvement', 
+      'Improve vital body processes like digestion and sleep', 
+      'Avoid psychological issues like depression and loneliness',
+      'Flexibility & Mobility'
     ]
   }
 ];
@@ -175,10 +196,6 @@ interface DailyLog {
   fitSteps?: number;
   fitDistance?: number;
   fitActiveMinutes?: number;
-  appleSteps?: number;
-  appleCalories?: number;
-  appleHeartRate?: number;
-  appleWorkouts?: any[];
   sleepDuration?: number; // in minutes
   sleepQuality?: 'poor' | 'fair' | 'good' | 'excellent';
   sleepNotes?: string;
@@ -186,13 +203,13 @@ interface DailyLog {
 
 // --- Components ---
 
-const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'outline' | 'ghost', size?: 'sm' | 'md' | 'lg' }>(
+export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'outline' | 'ghost', size?: 'sm' | 'md' | 'lg' }>(
   ({ className, variant = 'primary', size = 'md', ...props }, ref) => {
     const variants = {
-      primary: 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm',
-      secondary: 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200',
-      outline: 'border border-emerald-200 text-emerald-700 hover:bg-emerald-50',
-      ghost: 'text-emerald-700 hover:bg-emerald-50',
+      primary: 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm',
+      secondary: 'bg-primary-100 text-primary-900 hover:bg-primary-200',
+      outline: 'border border-primary-200 text-primary-700 hover:bg-primary-50',
+      ghost: 'text-primary-700 hover:bg-primary-50',
     };
     const sizes = {
       sm: 'px-3 py-1.5 text-sm',
@@ -209,16 +226,82 @@ const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HT
   }
 );
 
-const Card = ({ children, className, onClick }: { children: React.ReactNode, className?: string, onClick?: () => void }) => (
+const Card = ({ children, className, onClick, id }: { children: React.ReactNode, className?: string, onClick?: () => void, id?: string }) => (
   <div 
+    id={id}
     onClick={onClick}
-    className={cn('bg-white rounded-2xl border border-emerald-50 shadow-sm overflow-hidden', className)}
+    className={cn('bg-white rounded-2xl border border-primary-50 shadow-sm overflow-hidden', className)}
   >
     {children}
   </div>
 );
 
 // --- Main App ---
+
+const PLAN_CREDITS: Record<string, number> = {
+  'free': 200,
+  'monthly': 1200,
+  'quarterly': 4000,
+  'annual': 18000
+};
+
+function NotificationManager({ user }: { user: UserProfile }) {
+  useEffect(() => {
+    if (!user || !user.notificationsEnabled) return;
+
+    // Request permission if not granted
+    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+      Notification.requestPermission();
+    }
+
+    const showNotification = (title: string, options?: NotificationOptions) => {
+      // Show in-app toast
+      toast(title, { description: options?.body, duration: 5000 });
+      
+      // Show system notification if granted and app is in background
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification(title, options);
+      }
+    };
+
+    // Water Reminder
+    let waterInterval: NodeJS.Timeout;
+    if (user.waterReminderInterval && user.waterReminderInterval > 0) {
+      waterInterval = setInterval(() => {
+        showNotification('💧 Time to hydrate!', {
+          body: 'Drink a glass of water to stay on track.'
+        });
+      }, user.waterReminderInterval * 60 * 1000);
+    }
+
+    // Meal Reminders (Simple logic: check time every minute, trigger around standard meal times)
+    let mealInterval: NodeJS.Timeout;
+    if (user.mealReminderEnabled) {
+      mealInterval = setInterval(() => {
+        const hour = new Date().getHours();
+        const minute = new Date().getMinutes();
+        
+        // Trigger at exactly 9:00, 14:00, 19:00
+        if (minute === 0) {
+          if (hour === 9) {
+            showNotification('🍳 Breakfast Time!', { body: 'Don\'t forget to log your breakfast.' });
+          } else if (hour === 14) {
+            showNotification('🥗 Lunch Time!', { body: 'Time for a healthy lunch. Log it in the app!' });
+          } else if (hour === 19) {
+            showNotification('🍽️ Dinner Time!', { body: 'Log your dinner to keep your macros accurate.' });
+          }
+        }
+      }, 60 * 1000);
+    }
+
+    return () => {
+      if (waterInterval) clearInterval(waterInterval);
+      if (mealInterval) clearInterval(mealInterval);
+    };
+  }, [user]);
+
+  return null;
+}
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -228,6 +311,12 @@ export default function App() {
   const [adminViewMode, setAdminViewMode] = useState<'trainer' | 'user'>('user');
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showCookieBanner, setShowCookieBanner] = useState(() => !localStorage.getItem('nabd_cookies_accepted'));
+
+  const acceptCookies = () => {
+    localStorage.setItem('nabd_cookies_accepted', 'true');
+    setShowCookieBanner(false);
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -236,6 +325,23 @@ export default function App() {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data() as UserProfile;
+            
+            // Migration: Ensure every user has a subscription type
+            if (!userData.subscriptionType) {
+              userData.subscriptionType = 'free';
+              userData.credits = 200;
+              userData.subscriptionExpiry = new Date(new Date().setFullYear(new Date().getFullYear() + 100)).toISOString();
+              userData.subscriptionStartDate = new Date().toISOString();
+              userData.lastResetDate = new Date().toISOString();
+              await updateDoc(doc(db, 'users', firebaseUser.uid), {
+                subscriptionType: userData.subscriptionType,
+                credits: userData.credits,
+                subscriptionExpiry: userData.subscriptionExpiry,
+                subscriptionStartDate: userData.subscriptionStartDate,
+                lastResetDate: userData.lastResetDate
+              });
+            }
+
             if (userData.email === 'hmar97615@gmail.com' && userData.role !== 'admin') {
               userData.role = 'admin';
               await updateDoc(doc(db, 'users', firebaseUser.uid), { role: 'admin' });
@@ -250,6 +356,11 @@ export default function App() {
               photoURL: firebaseUser.photoURL || '',
               role: firebaseUser.email === 'hmar97615@gmail.com' ? 'admin' : 'user',
               onboarded: false,
+              credits: 200,
+              subscriptionType: 'free',
+              subscriptionExpiry: new Date(new Date().setFullYear(new Date().getFullYear() + 100)).toISOString(), // 100 years for free
+              subscriptionStartDate: new Date().toISOString(),
+              lastResetDate: new Date().toISOString()
             };
             await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
             setUser(newUser);
@@ -282,31 +393,55 @@ export default function App() {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      // تسجيل دخول تلقائي ومباشر بالإيميل الثابت اللي عملناه في الفايربيز
+      await signInWithEmailAndPassword(auth, 'emad@nabd.com', '123456');
+      
+      // التوجيه فوراً للشاشة الرئيسية
+      setActiveTab('dashboard'); // وهذا يعادل router.push('/home') في هذا المشروع
+      
     } catch (error: any) {
-      // Ignore common user-cancelled errors
-      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-        console.log('Login cancelled by user');
-      } else if (error.code === 'auth/unauthorized-domain') {
-        alert("This domain is not authorized for OAuth operations. Please add it to your Firebase console under Authentication > Settings > Authorized domains.");
-      } else {
-        console.error('Login error:', error);
-        alert(`Login failed: ${error.message}`);
-      }
+      console.error('Login error:', error);
+      alert(`Login failed: ${error.message}`);
     } finally {
       setIsLoggingIn(false);
     }
   };
 
+  useEffect(() => {
+    const checkSubscriptionReset = async () => {
+      if (!user || !user.subscriptionType || !user.lastResetDate) return;
+
+      const lastReset = new Date(user.lastResetDate);
+      const now = new Date();
+      const diffMonths = (now.getFullYear() - lastReset.getFullYear()) * 12 + (now.getMonth() - lastReset.getMonth());
+
+      if (diffMonths >= 1) {
+        // Check if subscription is still active
+        const expiry = new Date(user.subscriptionExpiry);
+        if (now <= expiry) {
+          const planCredits = PLAN_CREDITS[user.subscriptionType] || 0;
+          const updates = {
+            credits: planCredits, // Reset to plan amount
+            lastResetDate: now.toISOString()
+          };
+          await updateDoc(doc(db, 'users', user.uid), updates);
+          setUser({ ...user, ...updates });
+        }
+      }
+    };
+
+    checkSubscriptionReset();
+  }, [user?.uid, user?.lastResetDate, user?.subscriptionType]);
+
   const handleLogout = () => signOut(auth);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-emerald-50">
+      <div className="min-h-screen flex items-center justify-center bg-primary-50">
         <motion.div 
           animate={{ scale: [1, 1.2, 1], rotate: [0, 180, 360] }}
           transition={{ duration: 2, repeat: Infinity }}
-          className="text-emerald-600"
+          className="text-primary-600"
         >
           <Heart size={48} fill="currentColor" />
         </motion.div>
@@ -324,58 +459,86 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <Toaster position="top-center" richColors />
+      <NotificationManager user={user} />
+      
       {/* Sidebar */}
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-emerald-50 transform transition-transform duration-300 md:relative md:translate-x-0",
+        "fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-primary-50 transform transition-transform duration-300 md:relative md:translate-x-0 overflow-y-auto",
         isMenuOpen ? "translate-x-0" : "-translate-x-full"
       )}>
-        <div className="p-6 flex flex-col h-full">
+        <div className="p-6 flex flex-col min-h-full">
           <div className="flex items-center gap-2 mb-10">
-            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200">
+            <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary-200">
               <Heart size={24} fill="currentColor" />
             </div>
-            <span className="text-2xl font-bold text-emerald-900 tracking-tight">NABD</span>
+            <span className="text-2xl font-display font-bold text-primary-900 tracking-tight">NABD</span>
           </div>
 
           <nav className="space-y-2 flex-1">
             {(user.role === 'coach' || (user.role === 'admin' && adminViewMode === 'trainer')) ? (
               <>
-                <NavItem icon={<LayoutDashboard size={20} />} label="لوحة المدرب" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Users size={20} />} label="عملائي" active={activeTab === 'clients'} onClick={() => { setActiveTab('clients'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Calendar size={20} />} label="الجدول" active={activeTab === 'schedule'} onClick={() => { setActiveTab('schedule'); setIsMenuOpen(false); }} />
-                <NavItem icon={<MessageSquare size={20} />} label="الرسائل" active={activeTab === 'messages'} onClick={() => { setActiveTab('messages'); setIsMenuOpen(false); }} />
-                <NavItem icon={<User size={20} />} label="الملف الشخصي" active={activeTab === 'profile'} onClick={() => { setActiveTab('profile'); setIsMenuOpen(false); }} />
+                <NavItem icon={<LayoutDashboard size={20} />} label="Coach Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Users size={20} />} label="My Clients" active={activeTab === 'clients'} onClick={() => { setActiveTab('clients'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Calendar size={20} />} label="Schedule" active={activeTab === 'schedule'} onClick={() => { setActiveTab('schedule'); setIsMenuOpen(false); }} />
+                <NavItem icon={<MessageSquare size={20} />} label="Messages" active={activeTab === 'messages'} onClick={() => { setActiveTab('messages'); setIsMenuOpen(false); }} />
+                <NavItem icon={<User size={20} />} label="Profile" active={activeTab === 'profile'} onClick={() => { setActiveTab('profile'); setIsMenuOpen(false); }} />
               </>
             ) : (
               <>
-                <NavItem icon={<LayoutDashboard size={20} />} label="لوحة التحكم" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMenuOpen(false); }} />
-                <NavItem icon={<MessageSquare size={20} />} label="المساعد الصحي" active={activeTab === 'assistant'} onClick={() => { setActiveTab('assistant'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Utensils size={20} />} label="التغذية" active={activeTab === 'nutrition'} onClick={() => { setActiveTab('nutrition'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Target size={20} />} label="الخطط الذكية" active={activeTab === 'plans'} onClick={() => { setActiveTab('plans'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Users size={20} />} label="المدربين" active={activeTab === 'coaches'} onClick={() => { setActiveTab('coaches'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Dumbbell size={20} />} label="الرياضة" active={activeTab === 'sports'} onClick={() => { setActiveTab('sports'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Moon size={20} />} label="تتبع النوم" active={activeTab === 'sleep'} onClick={() => { setActiveTab('sleep'); setIsMenuOpen(false); }} />
-                <NavItem icon={<TrendingUp size={20} />} label="التقدم" active={activeTab === 'progress'} onClick={() => { setActiveTab('progress'); setIsMenuOpen(false); }} />
-                <NavItem icon={<Watch size={20} />} label="نبض الساعة" active={activeTab === 'watch'} onClick={() => { setActiveTab('watch'); setIsMenuOpen(false); }} />
-                <NavItem icon={<User size={20} />} label="الملف الشخصي" active={activeTab === 'profile'} onClick={() => { setActiveTab('profile'); setIsMenuOpen(false); }} />
+                <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMenuOpen(false); }} />
+                <NavItem icon={<MessageSquare size={20} />} label="Health Assistant" active={activeTab === 'assistant'} onClick={() => { setActiveTab('assistant'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Utensils size={20} />} label="Nutrition" active={activeTab === 'nutrition'} onClick={() => { setActiveTab('nutrition'); setIsMenuOpen(false); }} />
+                <NavItem icon={<CreditCard size={20} />} label="Subscriptions & Payments" active={activeTab === 'plans'} onClick={() => { setActiveTab('plans'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Calendar size={20} />} label="Smart Plans" active={activeTab === 'smart-plans'} onClick={() => { setActiveTab('smart-plans'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Users size={20} />} label="Coaches" active={activeTab === 'coaches'} onClick={() => { setActiveTab('coaches'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Dumbbell size={20} />} label="Sports" active={activeTab === 'sports'} onClick={() => { setActiveTab('sports'); setIsMenuOpen(false); }} />
+                <NavItem icon={<CheckCircle2 size={20} />} label="Habit Tracker" active={activeTab === 'habits'} onClick={() => { setActiveTab('habits'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Moon size={20} />} label="Sleep Tracking" active={activeTab === 'sleep'} onClick={() => { setActiveTab('sleep'); setIsMenuOpen(false); }} />
+                <NavItem icon={<TrendingUp size={20} />} label="Progress" active={activeTab === 'progress'} onClick={() => { setActiveTab('progress'); setIsMenuOpen(false); }} />
+                <NavItem icon={<Watch size={20} />} label="Google Fit & Watches" active={activeTab === 'watch'} onClick={() => { setActiveTab('watch'); setIsMenuOpen(false); }} />
+                <NavItem icon={<User size={20} />} label="Profile" active={activeTab === 'profile'} onClick={() => { setActiveTab('profile'); setIsMenuOpen(false); }} />
               </>
             )}
             {user.role === 'admin' && (
-              <NavItem icon={<ShieldAlert size={20} />} label="لوحة الإدارة" active={activeTab === 'admin'} onClick={() => { setActiveTab('admin'); setIsMenuOpen(false); }} />
+              <NavItem icon={<ShieldAlert size={20} />} label="Admin Panel" active={activeTab === 'admin'} onClick={() => { setActiveTab('admin'); setIsMenuOpen(false); }} />
             )}
           </nav>
 
-          <div className="mt-auto pt-6 border-t border-emerald-50">
+          <div className="mt-auto pt-6 border-t border-primary-50 space-y-4">
+            {/* Credits Display */}
+            <div className="px-2">
+              <div className="bg-slate-900 rounded-2xl p-4 text-white relative overflow-hidden group">
+                <div className="relative z-10 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Remaining Balance</p>
+                    <p className="text-xl font-black">{user.credits?.toLocaleString() || 0} <span className="text-xs font-bold text-primary-400">Credits</span></p>
+                  </div>
+                  <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-primary-400 group-hover:scale-110 transition-transform">
+                    <Zap size={20} fill="currentColor" />
+                  </div>
+                </div>
+                <div className="absolute -bottom-4 -right-4 w-16 h-16 bg-primary-500/20 rounded-full blur-xl" />
+                <button 
+                  onClick={() => setActiveTab('plans')}
+                  className="w-full mt-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
+                >
+                  <TrendingUp size={12} />
+                  Top Up Balance
+                </button>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3 mb-6 px-2">
-              <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full border-2 border-emerald-100" />
+              <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full border-2 border-primary-100" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-slate-900 truncate">{user.displayName}</p>
                 <p className="text-xs text-slate-500 truncate">{user.email}</p>
               </div>
             </div>
-            <button onClick={handleLogout} className="flex items-center gap-2 text-slate-500 hover:text-red-600 transition-colors w-full px-2">
+            <button onClick={handleLogout} className="flex items-center gap-2 text-slate-500 hover:text-red-600 transition-colors w-full px-2 pb-2">
               <LogOut size={18} />
-              <span className="text-sm font-medium">تسجيل الخروج</span>
+              <span className="text-sm font-medium">Logout</span>
             </button>
           </div>
         </div>
@@ -383,17 +546,17 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-16 bg-white border-b border-emerald-50 flex items-center justify-between px-6 md:hidden">
+        <header className="h-16 bg-white border-b border-primary-50 flex items-center justify-between px-6 md:hidden">
           <div className="flex items-center gap-2">
-            <Heart size={20} className="text-emerald-600" fill="currentColor" />
-            <span className="font-bold text-emerald-900">NABD</span>
+            <Heart size={20} className="text-primary-600" fill="currentColor" />
+            <span className="font-display font-bold text-primary-900">NABD</span>
           </div>
           <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 text-slate-600">
             {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-6 md:p-10">
+        <div className="flex-1 overflow-y-auto p-4 md:p-10 pb-24 md:pb-10">
           <AnimatePresence mode="wait">
             {user.role === 'coach' || (user.role === 'admin' && adminViewMode === 'trainer') ? (
               <>
@@ -406,26 +569,116 @@ export default function App() {
             ) : (
               <>
                 {activeTab === 'dashboard' && <Dashboard user={user} logs={dailyLogs} onTabChange={setActiveTab} onUpdate={(u) => setUser(u)} />}
-                {activeTab === 'nutrition' && <NutritionModule user={user} />}
-                {activeTab === 'plans' && <PlansModule user={user} onUpdate={(u) => setUser(u)} />}
+                {activeTab === 'nutrition' && <NutritionModule user={user} onUpdate={setUser} />}
+                {activeTab === 'plans' && <PlansModule user={user} onUpdate={(u) => setUser(u)} view="subscriptions" />}
+                {activeTab === 'smart-plans' && <PlansModule user={user} onUpdate={(u) => setUser(u)} view="smart" />}
                 {activeTab === 'coaches' && <CoachMarketplace />}
-                {activeTab === 'sports' && <SportsModule user={user} />}
+                {activeTab === 'sports' && <SportsModule user={user} onUpdate={setUser} />}
+                {activeTab === 'habits' && <HabitModule user={user} />}
                 {activeTab === 'sleep' && <SleepModule user={user} />}
-                {activeTab === 'progress' && <ProgressView logs={dailyLogs} />}
+                {activeTab === 'progress' && <ProgressView logs={dailyLogs} user={user} onUpdate={setUser} />}
                 {activeTab === 'profile' && <ProfileSettings user={user} onUpdate={(u) => setUser(u)} />}
                 {activeTab === 'watch' && <SmartwatchModule user={user} />}
-                {activeTab === 'assistant' && <HealthAssistant />}
+                {activeTab === 'assistant' && <HealthAssistant user={user} onUpdate={setUser} />}
                 {activeTab === 'admin' && user.role === 'admin' && <AdminDashboard setActiveTab={setActiveTab} setAdminViewMode={setAdminViewMode} />}
               </>
             )}
           </AnimatePresence>
         </div>
+
+        {/* Bottom Navigation for Mobile */}
+        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} role={user.role} />
+
+        {/* Cookie & Privacy Banner */}
+        <AnimatePresence>
+          {showCookieBanner && (
+            <motion.div 
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-96 z-[100]"
+            >
+              <Card className="p-5 shadow-2xl border-primary-100 bg-white/95 backdrop-blur-md">
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="w-10 h-10 bg-primary-50 rounded-full flex items-center justify-center text-primary-600 shrink-0">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-bold text-slate-900 mb-1">Privacy & Data Notice</h4>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      We use cookies and the data you provide to improve your experience and deliver personalized health plans. 
+                      By using the app, you agree to our Privacy Policy and our use of data for analysis and development purposes.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    size="sm" 
+                    onClick={acceptCookies}
+                    className="flex-1 py-2 rounded-xl text-xs font-bold bg-primary-600 text-white"
+                  >
+                    I Understand & Accept
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost"
+                    onClick={() => setShowCookieBanner(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400"
+                  >
+                    Later
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );
 }
 
 // --- Sub-components ---
+
+function BottomNav({ activeTab, setActiveTab, role }: { activeTab: string, setActiveTab: (tab: string) => void, role: string }) {
+  const navItems = role === 'coach' ? [
+    { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
+    { id: 'clients', icon: <Users size={20} />, label: 'Clients' },
+    { id: 'schedule', icon: <Calendar size={20} />, label: 'Schedule' },
+    { id: 'messages', icon: <MessageSquare size={20} />, label: 'Messages' },
+    { id: 'profile', icon: <User size={20} />, label: 'Profile' },
+  ] : [
+    { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Home' },
+    { id: 'plans', icon: <CreditCard size={20} />, label: 'Subscriptions' },
+    { id: 'habits', icon: <CheckCircle2 size={20} />, label: 'Habits' },
+    { id: 'sports', icon: <Dumbbell size={20} />, label: 'Sports' },
+    { id: 'assistant', icon: <MessageSquare size={20} />, label: 'Assistant' },
+    { id: 'nutrition', icon: <Utensils size={20} />, label: 'Nutrition' },
+    { id: 'profile', icon: <User size={20} />, label: 'Profile' },
+  ];
+
+  return (
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-primary-50 px-1 py-2 flex justify-between items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+      {navItems.map((item) => (
+        <button
+          key={item.id}
+          onClick={() => setActiveTab(item.id)}
+          className={cn(
+            "relative flex flex-col items-center justify-center gap-1 p-1 flex-1 rounded-xl transition-all duration-200",
+            activeTab === item.id ? "text-primary-600" : "text-slate-400"
+          )}
+        >
+          <span className={cn("transition-colors", activeTab === item.id ? "text-primary-600" : "text-slate-400")}>
+            {item.icon}
+          </span>
+          <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-tighter text-center leading-none w-full truncate px-0.5">{item.label}</span>
+          {activeTab === item.id && (
+            <motion.div layoutId="bottom-nav-indicator" className="w-1 h-1 rounded-full bg-primary-600 absolute -bottom-1" />
+          )}
+        </button>
+      ))}
+    </nav>
+  );
+}
 
 function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
   return (
@@ -434,40 +687,40 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
       className={cn(
         "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
         active 
-          ? "bg-emerald-50 text-emerald-700 font-semibold shadow-sm" 
+          ? "bg-primary-50 text-primary-700 font-semibold shadow-sm" 
           : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
       )}
     >
-      <span className={cn("transition-colors", active ? "text-emerald-600" : "text-slate-400")}>
+      <span className={cn("transition-colors", active ? "text-primary-600" : "text-slate-400")}>
         {icon}
       </span>
       <span className="text-sm">{label}</span>
-      {active && <motion.div layoutId="active-pill" className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-600" />}
+      {active && <motion.div layoutId="active-pill" className="ml-auto w-1.5 h-1.5 rounded-full bg-primary-600" />}
     </button>
   );
 }
 
 function LandingPage({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn: boolean }) {
   return (
-    <div className="min-h-screen bg-white font-sans selection:bg-emerald-100 selection:text-emerald-900">
+    <div className="min-h-screen bg-slate-50 font-sans selection:bg-primary-100 selection:text-primary-900">
       {/* Navigation */}
       <nav className="max-w-7xl mx-auto px-6 py-8 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-            <Heart size={24} fill="currentColor" />
+          <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary-500/30">
+            <Activity size={24} />
           </div>
-          <span className="text-2xl font-bold text-emerald-900">NABD</span>
+          <span className="text-2xl font-display font-bold text-slate-900">NABD</span>
         </div>
-        <div className="hidden md:flex items-center gap-8 text-slate-600 font-medium">
-          <a href="#features" className="hover:text-emerald-600 transition-colors">Features</a>
-          <a href="#coaches" className="hover:text-emerald-600 transition-colors">Coaches</a>
-          <a href="#about" className="hover:text-emerald-600 transition-colors">Science</a>
+        <div className="hidden md:flex items-center gap-8 text-slate-500 font-medium">
+          <a href="#features" className="hover:text-primary-600 transition-colors">Features</a>
+          <a href="#coaches" className="hover:text-primary-600 transition-colors">Coaches</a>
+          <a href="#about" className="hover:text-primary-600 transition-colors">Science</a>
         </div>
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={onLogin} disabled={isLoggingIn} className="hidden sm:flex">
+          <Button variant="ghost" onClick={onLogin} disabled={isLoggingIn} className="hidden sm:flex text-slate-600 hover:text-slate-900">
             Login
           </Button>
-          <Button onClick={onLogin} disabled={isLoggingIn} className="rounded-full px-8">
+          <Button onClick={onLogin} disabled={isLoggingIn} className="rounded-full px-8 bg-slate-900 text-white hover:bg-slate-800">
             {isLoggingIn ? 'Connecting...' : 'Sign Up Free'}
           </Button>
         </div>
@@ -480,31 +733,31 @@ function LandingPage({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingI
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.8 }}
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-sm font-semibold mb-6">
-            <Activity size={16} />
-            <span>AI-Powered Health Platform</span>
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-sm font-bold mb-8">
+            <Zap size={16} className="text-accent-500" />
+            <span>The Clarity Engine for Your Health</span>
           </div>
-          <h1 className="text-6xl md:text-7xl font-bold text-slate-900 leading-[1.1] mb-8 tracking-tight">
-            Your Health, <br />
-            <span className="text-emerald-600">Reimagined.</span>
+          <h1 className="text-6xl lg:text-7xl font-display font-bold text-slate-900 leading-[1.05] mb-8 tracking-tight">
+            Master your health. <br />
+            <span className="text-primary-600">Zero overwhelm.</span>
           </h1>
           <p className="text-xl text-slate-600 leading-relaxed mb-10 max-w-lg">
-            NABD combines cutting-edge AI with scientific research to help you track nutrition, connect with pro coaches, and reach your goals.
+            NABD brings your nutrition, sleep, and movement into one clear dashboard. Stop guessing and start optimizing with clinical-grade tracking.
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
-            <Button size="lg" onClick={onLogin} disabled={isLoggingIn} className="rounded-full px-10">
-              {isLoggingIn ? 'Connecting...' : 'Start Your Journey'}
+            <Button size="lg" onClick={onLogin} disabled={isLoggingIn} className="rounded-full px-10 bg-accent-500 hover:bg-accent-600 text-white border-none shadow-lg shadow-accent-500/30">
+              {isLoggingIn ? 'Connecting...' : 'Start Tracking Now'}
             </Button>
-            <Button size="lg" variant="outline" className="rounded-full px-10">Watch Demo</Button>
+            <Button size="lg" variant="outline" className="rounded-full px-10 border-slate-200 hover:bg-slate-100 text-slate-700">See How It Works</Button>
           </div>
           <div className="mt-12 flex items-center gap-6">
             <div className="flex -space-x-3">
               {[1,2,3,4].map(i => (
-                <img key={i} src={`https://picsum.photos/seed/user${i}/100/100`} className="w-12 h-12 rounded-full border-4 border-white shadow-sm" />
+                <img key={i} src={`https://picsum.photos/seed/user${i}/100/100`} className="w-12 h-12 rounded-full border-4 border-slate-50 shadow-sm" referrerPolicy="no-referrer" />
               ))}
             </div>
             <p className="text-sm text-slate-500 font-medium">
-              Joined by <span className="text-slate-900 font-bold">10,000+</span> health enthusiasts
+              Join <span className="text-slate-900 font-bold">50,000+</span> optimizers
             </p>
           </div>
         </motion.div>
@@ -515,18 +768,18 @@ function LandingPage({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingI
           transition={{ duration: 1, delay: 0.2 }}
           className="relative"
         >
-          <div className="relative z-10 rounded-3xl overflow-hidden shadow-2xl shadow-emerald-200/50 border-8 border-white">
+          <div className="relative z-10 rounded-3xl overflow-hidden shadow-2xl shadow-primary-200/50 border-8 border-white">
             <img src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=1000" alt="Fitness" className="w-full h-auto" />
           </div>
           {/* Floating elements */}
           <motion.div 
             animate={{ y: [0, -10, 0] }}
             transition={{ duration: 4, repeat: Infinity }}
-            className="absolute -top-6 -right-6 z-20 bg-white p-4 rounded-2xl shadow-xl border border-emerald-50"
+            className="absolute -top-6 -right-6 z-20 bg-white p-4 rounded-2xl shadow-xl border border-primary-50"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center">
-                <Apple size={20} />
+              <div className="w-10 h-10 bg-accent-50 text-accent-600 rounded-lg flex items-center justify-center">
+                <Flame size={20} />
               </div>
               <div>
                 <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Calories</p>
@@ -537,10 +790,10 @@ function LandingPage({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingI
           <motion.div 
             animate={{ y: [0, 10, 0] }}
             transition={{ duration: 5, repeat: Infinity, delay: 1 }}
-            className="absolute -bottom-10 -left-10 z-20 bg-white p-6 rounded-2xl shadow-xl border border-emerald-50"
+            className="absolute -bottom-10 -left-10 z-20 bg-white p-6 rounded-2xl shadow-xl border border-primary-50"
           >
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+              <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-full flex items-center justify-center">
                 <TrendingUp size={24} />
               </div>
               <div>
@@ -553,25 +806,25 @@ function LandingPage({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingI
       </section>
 
       {/* Features Grid */}
-      <section id="features" className="bg-slate-50 py-32">
+      <section id="features" className="bg-white py-32">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-20">
-            <h2 className="text-4xl font-bold text-slate-900 mb-4">Everything you need to thrive</h2>
-            <p className="text-slate-600 max-w-2xl mx-auto">Our platform integrates advanced technology with human expertise to provide a holistic health experience.</p>
+            <h2 className="text-5xl font-display font-bold text-slate-900 mb-6">Everything you need to thrive</h2>
+            <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">Our platform integrates advanced technology with human expertise to provide a holistic health experience that feels intuitive, not overwhelming.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-8">
             <FeatureCard 
-              icon={<Camera className="text-emerald-600" />} 
+              icon={<Camera className="text-primary-600" />} 
               title="AI Calorie Counting" 
               desc="Just snap a photo of your meal. Our AI identifies ingredients and estimates nutritional value instantly."
             />
             <FeatureCard 
-              icon={<Users className="text-emerald-600" />} 
+              icon={<Users className="text-primary-600" />} 
               title="Expert Coaches" 
               desc="Connect with certified trainers across various disciplines. Get personalized guidance and support."
             />
             <FeatureCard 
-              icon={<TrendingUp className="text-emerald-600" />} 
+              icon={<TrendingUp className="text-primary-600" />} 
               title="Data-Driven Insights" 
               desc="Track your InBody metrics, daily logs, and progress with beautiful, easy-to-read visualizations."
             />
@@ -584,11 +837,11 @@ function LandingPage({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingI
 
 function FeatureCard({ icon, title, desc }: { icon: React.ReactNode, title: string, desc: string }) {
   return (
-    <div className="bg-white p-8 rounded-3xl border border-emerald-50 hover:shadow-xl hover:shadow-emerald-100/50 transition-all duration-300 group">
-      <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+    <div className="bg-white p-8 rounded-3xl border border-slate-100 hover:shadow-xl hover:shadow-primary-100/50 transition-all duration-300 group">
+      <div className="w-14 h-14 bg-primary-50 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
         {icon}
       </div>
-      <h3 className="text-xl font-bold text-slate-900 mb-3">{title}</h3>
+      <h3 className="text-xl font-display font-bold text-slate-900 mb-3">{title}</h3>
       <p className="text-slate-600 leading-relaxed">{desc}</p>
     </div>
   );
@@ -604,6 +857,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
     playsSports: undefined,
   });
   const [saving, setSaving] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // Determine which questions are visible based on what's filled
   const isRoleFilled = !!formData.role;
@@ -686,39 +940,39 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
   };
 
   return (
-    <div className="min-h-screen bg-emerald-50 py-12 px-4 sm:px-6 lg:px-8" dir="rtl">
+    <div className="min-h-screen bg-primary-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto space-y-8">
         <div className="text-center mb-12">
-          <h1 className="text-3xl font-bold text-slate-900">لنقم بإعداد ملفك الشخصي</h1>
-          <p className="text-slate-600 mt-2">أجب عن بضعة أسئلة للحصول على توصيات مخصصة.</p>
+          <h1 className="text-4xl font-serif font-bold text-slate-900">Let's set up your profile</h1>
+          <p className="text-slate-600 mt-2">Answer a few questions to get personalized recommendations.</p>
         </div>
 
         <div className="space-y-8">
           {/* Role Selection */}
-          <Card className="p-6 shadow-sm border-emerald-100">
-            <label className="block text-lg font-bold text-slate-900 mb-4" dir="rtl">هل تنضم كمستخدم أم كمدرب؟ *</label>
-            <div className="grid grid-cols-2 gap-4" dir="rtl">
+          <Card className="p-6 shadow-sm border-primary-100">
+            <label className="block text-lg font-bold text-slate-900 mb-4">Are you joining as a User or a Coach? *</label>
+            <div className="grid grid-cols-2 gap-4">
               <button
                 onClick={() => setFormData({ ...formData, role: 'user' })}
                 className={cn(
                   "py-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-3",
-                  formData.role === 'user' ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200 bg-white"
+                  formData.role === 'user' ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200 bg-white"
                 )}
               >
                 <User size={32} />
-                <span className="font-bold text-lg">مستخدم</span>
-                <span className="text-xs opacity-80">أريد تتبع لياقتي</span>
+                <span className="font-bold text-lg">User</span>
+                <span className="text-xs opacity-80">I want to track my fitness</span>
               </button>
               <button
                 onClick={() => setFormData({ ...formData, role: 'coach' })}
                 className={cn(
                   "py-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-3",
-                  formData.role === 'coach' ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200 bg-white"
+                  formData.role === 'coach' ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200 bg-white"
                 )}
               >
                 <Users size={32} />
-                <span className="font-bold text-lg">مدرب</span>
-                <span className="text-xs opacity-80">أريد تدريب الآخرين</span>
+                <span className="font-bold text-lg">Coach</span>
+                <span className="text-xs opacity-80">I want to train others</span>
               </button>
             </div>
           </Card>
@@ -728,11 +982,11 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
             <>
               {/* Age */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                <Card className="p-6 shadow-sm border-emerald-100">
+                <Card className="p-6 shadow-sm border-primary-100">
                   <label className="block text-lg font-bold text-slate-900 mb-4">1. What is your age? *</label>
                   <input 
                     type="number" 
-                    className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
+                    className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-lg"
                     placeholder="e.g. 25"
                     value={formData.age || ''}
                     onChange={e => setFormData({ ...formData, age: e.target.value ? Number(e.target.value) : undefined })}
@@ -743,7 +997,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Gender */}
           {isAgeFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">2. What is your gender? *</label>
                 <div className="grid grid-cols-3 gap-3">
                   {['male', 'female', 'other'].map(g => (
@@ -752,7 +1006,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                       onClick={() => setFormData({ ...formData, gender: g as any })}
                       className={cn(
                         "py-4 rounded-xl border-2 transition-all capitalize font-semibold text-lg",
-                        formData.gender === g ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                        formData.gender === g ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200"
                       )}
                     >
                       {g}
@@ -766,11 +1020,11 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Nationality */}
           {isGenderFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">3. What is your nationality? *</label>
                 <input 
                   type="text" 
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-lg"
                   placeholder="e.g. Egyptian, Saudi, American..."
                   value={formData.nationality || ''}
                   onChange={e => setFormData({ ...formData, nationality: e.target.value })}
@@ -782,11 +1036,11 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Height */}
           {isNationalityFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">4. What is your height (cm)? *</label>
                 <input 
                   type="number" 
-                  className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
+                  className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-lg"
                   placeholder="e.g. 175"
                   value={formData.height || ''}
                   onChange={e => setFormData({ ...formData, height: e.target.value ? Number(e.target.value) : undefined })}
@@ -798,11 +1052,11 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Weight */}
           {isHeightFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">5. What is your weight (kg)? *</label>
                 <input 
                   type="number" 
-                  className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
+                  className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-lg"
                   placeholder="e.g. 70"
                   value={formData.weight || ''}
                   onChange={e => setFormData({ ...formData, weight: e.target.value ? Number(e.target.value) : undefined })}
@@ -814,7 +1068,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Goal */}
           {isWeightFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">6. What is your primary goal? *</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
@@ -828,10 +1082,10 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                       onClick={() => setFormData({ ...formData, goal: g.id as any })}
                       className={cn(
                         "flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left",
-                        formData.goal === g.id ? "bg-emerald-50 border-emerald-600 text-emerald-900" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                        formData.goal === g.id ? "bg-primary-50 border-primary-600 text-primary-900" : "border-slate-100 text-slate-600 hover:border-primary-200"
                       )}
                     >
-                      <div className={cn("w-12 h-12 rounded-lg flex items-center justify-center", formData.goal === g.id ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500")}>
+                      <div className={cn("w-12 h-12 rounded-lg flex items-center justify-center", formData.goal === g.id ? "bg-primary-600 text-white" : "bg-slate-100 text-slate-500")}>
                         {g.icon}
                       </div>
                       <span className="font-semibold text-lg">{g.label}</span>
@@ -845,7 +1099,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Fitness Level */}
           {isGoalFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">7. What is your fitness level? *</label>
                 <div className="grid grid-cols-3 gap-3">
                   {['beginner', 'intermediate', 'advanced'].map(level => (
@@ -854,7 +1108,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                       onClick={() => setFormData({ ...formData, fitnessLevel: level as any })}
                       className={cn(
                         "py-4 rounded-xl border-2 transition-all capitalize font-semibold text-lg",
-                        formData.fitnessLevel === level ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                        formData.fitnessLevel === level ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200"
                       )}
                     >
                       {level}
@@ -868,7 +1122,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Activity Level */}
           {isFitnessLevelFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">8. How active are you daily? *</label>
                 <div className="space-y-3">
                   {[
@@ -883,14 +1137,14 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                       onClick={() => setFormData({ ...formData, activityLevel: level.id as any })}
                       className={cn(
                         "w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all",
-                        formData.activityLevel === level.id ? "bg-emerald-50 border-emerald-600 text-emerald-900" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                        formData.activityLevel === level.id ? "bg-primary-50 border-primary-600 text-primary-900" : "border-slate-100 text-slate-600 hover:border-primary-200"
                       )}
                     >
                       <div className="text-left">
                         <div className="font-semibold text-lg">{level.label}</div>
                         <div className="text-sm opacity-70">{level.desc}</div>
                       </div>
-                      {formData.activityLevel === level.id && <CheckCircle2 className="text-emerald-600" size={24} />}
+                      {formData.activityLevel === level.id && <CheckCircle2 className="text-primary-600" size={24} />}
                     </button>
                   ))}
                 </div>
@@ -901,14 +1155,14 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Plays Sports? */}
           {isActivityLevelFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">9. Do you play any sports? *</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setFormData({ ...formData, playsSports: true })}
                     className={cn(
                       "py-4 rounded-xl border-2 transition-all font-semibold text-lg",
-                      formData.playsSports === true ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                      formData.playsSports === true ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200"
                     )}
                   >
                     Yes
@@ -917,7 +1171,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                     onClick={() => setFormData({ ...formData, playsSports: false, selectedSports: [] })}
                     className={cn(
                       "py-4 rounded-xl border-2 transition-all font-semibold text-lg",
-                      formData.playsSports === false ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                      formData.playsSports === false ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200"
                     )}
                   >
                     No
@@ -930,7 +1184,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Select Sports */}
           {isPlaysSportsFilled && formData.playsSports === true && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">10. Select your sports *</label>
                 <div className="space-y-3">
                   {SPORTS_DATA.map(sport => {
@@ -941,14 +1195,14 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                         onClick={() => toggleSport(sport.id)}
                         className={cn(
                           "w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left",
-                          isSelected ? "bg-emerald-50 border-emerald-600 text-emerald-900" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                          isSelected ? "bg-primary-50 border-primary-600 text-primary-900" : "border-slate-100 text-slate-600 hover:border-primary-200"
                         )}
                       >
-                        <div className={cn("w-12 h-12 rounded-lg flex items-center justify-center", isSelected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500")}>
+                        <div className={cn("w-12 h-12 rounded-lg flex items-center justify-center", isSelected ? "bg-primary-600 text-white" : "bg-slate-100 text-slate-500")}>
                           {sport.icon}
                         </div>
                         <span className="font-semibold text-lg flex-1">{sport.name}</span>
-                        {isSelected && <CheckCircle2 size={24} className="text-emerald-600" />}
+                        {isSelected && <CheckCircle2 size={24} className="text-primary-600" />}
                       </button>
                     );
                   })}
@@ -960,7 +1214,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Sports Goals */}
           {isSportsFilled && formData.playsSports === true && formData.selectedSports && formData.selectedSports.length > 0 && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">11. What are your goals for these sports? *</label>
                 <div className="space-y-6">
                   {formData.selectedSports.map(selectedSport => {
@@ -980,7 +1234,7 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
                                 onClick={() => toggleGoal(sportDef.id, goal)}
                                 className={cn(
                                   "px-4 py-2 rounded-lg text-sm transition-all border-2",
-                                  isGoalSelected ? "bg-emerald-100 border-emerald-400 text-emerald-800 font-bold" : "bg-white border-slate-200 text-slate-600 hover:border-emerald-200"
+                                  isGoalSelected ? "bg-primary-100 border-primary-400 text-primary-800 font-bold" : "bg-white border-slate-200 text-slate-600 hover:border-primary-200"
                                 )}
                               >
                                 {goal}
@@ -999,17 +1253,17 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Health Status */}
           {areSportGoalsFilled && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card className="p-6 shadow-sm border-emerald-100">
+              <Card className="p-6 shadow-sm border-primary-100">
                 <label className="block text-lg font-bold text-slate-900 mb-4">
                   {formData.playsSports ? "12." : "10."} Any health conditions or injuries? *
                 </label>
                 <textarea 
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none h-32 resize-none text-lg"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none h-32 resize-none text-lg"
                   placeholder="Type 'None' if you don't have any..."
                   value={formData.healthStatus || ''}
                   onChange={e => setFormData({ ...formData, healthStatus: e.target.value })}
                 />
-                <p className="text-sm text-slate-500 mt-2">This is required. If none, please type "None" or "لا يوجد".</p>
+                <p className="text-sm text-slate-500 mt-2">This is required. If none, please type "None".</p>
               </Card>
             </motion.div>
           )}
@@ -1022,16 +1276,16 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
             <>
               {/* Specialties */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                <Card className="p-6 shadow-sm border-emerald-100">
-                  <label className="block text-lg font-bold text-slate-900 mb-4" dir="rtl">1. ما هي تخصصاتك؟ *</label>
-                  <div className="flex flex-wrap gap-3" dir="rtl">
-                    {['إنقاص الوزن', 'بناء العضلات', 'كمال الأجسام', 'رفع الأثقال', 'يوجا', 'إعادة التأهيل', 'تغذية', 'تكييف رياضي'].map(s => (
+                <Card className="p-6 shadow-sm border-primary-100">
+                  <label className="block text-lg font-bold text-slate-900 mb-4">1. What are your specialties? *</label>
+                  <div className="flex flex-wrap gap-3">
+                    {['Weight Loss', 'Muscle Gain', 'Bodybuilding', 'Powerlifting', 'Yoga', 'Rehabilitation', 'Nutrition', 'Sports Conditioning'].map(s => (
                       <button
                         key={s}
                         onClick={() => toggleSpecialty(s)}
                         className={cn(
                           "px-4 py-3 rounded-xl border-2 transition-all font-semibold",
-                          formData.specialties?.includes(s) ? "bg-emerald-50 border-emerald-600 text-emerald-700" : "border-slate-100 text-slate-600 hover:border-emerald-200"
+                          formData.specialties?.includes(s) ? "bg-primary-50 border-primary-600 text-primary-700" : "border-slate-100 text-slate-600 hover:border-primary-200"
                         )}
                       >
                         {s}
@@ -1044,13 +1298,12 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
               {/* Experience */}
               {isSpecialtiesFilled && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                  <Card className="p-6 shadow-sm border-emerald-100">
-                    <label className="block text-lg font-bold text-slate-900 mb-4" dir="rtl">2. سنوات الخبرة؟ *</label>
+                  <Card className="p-6 shadow-sm border-primary-100">
+                    <label className="block text-lg font-bold text-slate-900 mb-4">2. Years of experience? *</label>
                     <input 
                       type="number" 
-                      className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
-                      placeholder="مثال: 5"
-                      dir="rtl"
+                      className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-lg"
+                      placeholder="e.g. 5"
                       value={formData.experienceYears || ''}
                       onChange={e => setFormData({ ...formData, experienceYears: e.target.value ? Number(e.target.value) : undefined })}
                     />
@@ -1061,12 +1314,11 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
               {/* Certifications */}
               {isExperienceFilled && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                  <Card className="p-6 shadow-sm border-emerald-100">
-                    <label className="block text-lg font-bold text-slate-900 mb-4" dir="rtl">3. اذكر شهاداتك (اختياري)</label>
+                  <Card className="p-6 shadow-sm border-primary-100">
+                    <label className="block text-lg font-bold text-slate-900 mb-4">3. List your certifications (optional)</label>
                     <textarea 
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none text-lg"
-                      placeholder="مثال: NASM CPT, ISSA Nutritionist..."
-                      dir="rtl"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none h-24 resize-none text-lg"
+                      placeholder="e.g. NASM CPT, ISSA Nutritionist..."
                       value={formData.certifications || ''}
                       onChange={e => setFormData({ ...formData, certifications: e.target.value })}
                     />
@@ -1077,12 +1329,11 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
               {/* Bio */}
               {isExperienceFilled && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                  <Card className="p-6 shadow-sm border-emerald-100">
-                    <label className="block text-lg font-bold text-slate-900 mb-4" dir="rtl">4. اكتب نبذة قصيرة عنك *</label>
+                  <Card className="p-6 shadow-sm border-primary-100">
+                    <label className="block text-lg font-bold text-slate-900 mb-4">4. Write a short bio about yourself *</label>
                     <textarea 
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none h-32 resize-none text-lg"
-                      placeholder="أخبر العملاء المحتملين عن أسلوبك في التدريب..."
-                      dir="rtl"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none h-32 resize-none text-lg"
+                      placeholder="Tell potential clients about your training style..."
                       value={formData.bio || ''}
                       onChange={e => setFormData({ ...formData, bio: e.target.value })}
                     />
@@ -1093,13 +1344,12 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
               {/* Hourly Rate */}
               {isBioFilled && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                  <Card className="p-6 shadow-sm border-emerald-100">
-                    <label className="block text-lg font-bold text-slate-900 mb-4" dir="rtl">5. ما هو أجرك بالساعة ($)؟ *</label>
+                  <Card className="p-6 shadow-sm border-primary-100">
+                    <label className="block text-lg font-bold text-slate-900 mb-4">5. What is your hourly rate ($)? *</label>
                     <input 
                       type="number" 
-                      className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
-                      placeholder="مثال: 50"
-                      dir="rtl"
+                      className="w-full max-w-xs px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-lg"
+                      placeholder="e.g. 50"
                       value={formData.hourlyRate || ''}
                       onChange={e => setFormData({ ...formData, hourlyRate: e.target.value ? Number(e.target.value) : undefined })}
                     />
@@ -1112,15 +1362,40 @@ function Onboarding({ user, onComplete }: { user: UserProfile, onComplete: (u: U
           {/* Complete Button */}
           {((formData.role === 'user' && areSportGoalsFilled && isHealthStatusFilled && formData.healthStatus!.trim().length > 0) || 
             (formData.role === 'coach' && isHourlyRateFilled)) && (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="pt-8 pb-12">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="pt-8 pb-12 space-y-6">
+              <Card className="p-6 border-primary-200 bg-white/50 backdrop-blur-sm">
+                <div className="flex items-start gap-3">
+                  <div className="pt-1">
+                    <input 
+                      type="checkbox" 
+                      id="terms"
+                      checked={acceptedTerms}
+                      onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                    />
+                  </div>
+                  <label htmlFor="terms" className="text-sm text-slate-600 leading-relaxed cursor-pointer select-none">
+                    I agree to the <span className="font-bold text-primary-700 underline">Terms of Service</span> and <span className="font-bold text-primary-700 underline">Privacy Policy</span>. 
+                    I acknowledge that I assume full responsibility for using the app, and that the health and fitness data I enter will be used to improve services and provide personalized recommendations. 
+                    I consent to the processing and use of this data by the platform in accordance with legal standards.
+                  </label>
+                </div>
+              </Card>
+
               <Button 
                 onClick={handleComplete} 
-                disabled={saving}
-                className="w-full py-6 rounded-2xl text-xl font-bold shadow-lg shadow-emerald-200"
+                disabled={saving || !acceptedTerms}
+                className={cn(
+                  "w-full py-6 rounded-2xl text-xl font-bold shadow-lg transition-all",
+                  acceptedTerms ? "shadow-primary-200" : "opacity-50 grayscale cursor-not-allowed"
+                )}
               >
-                {saving ? "جاري حفظ الملف الشخصي..." : "إكمال الإعداد"}
-                {!saving && <ChevronRight size={24} className="ml-2 rotate-180" />}
+                {saving ? "Saving profile..." : "Complete Setup"}
+                {!saving && <ChevronRight size={24} className="ml-2" />}
               </Button>
+              {!acceptedTerms && (
+                <p className="text-center text-xs text-red-500 font-medium">You must accept the terms to continue.</p>
+              )}
             </motion.div>
           )}
         </div>
@@ -1137,11 +1412,77 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
   const [steps, setSteps] = useState(0);
   const [distance, setDistance] = useState(0);
   const [activeMinutes, setActiveMinutes] = useState(0);
-  const [appleSteps, setAppleSteps] = useState(0);
-  const [appleCalories, setAppleCalories] = useState(0);
-  const [appleHeartRate, setAppleHeartRate] = useState(0);
   const [isSyncingFit, setIsSyncingFit] = useState(false);
-  const [isSyncingApple, setIsSyncingApple] = useState(false);
+
+  const deleteMeal = async (index: number) => {
+    if (!todayLog) return;
+    const mealToDelete = todayLog.meals[index];
+    const newMeals = todayLog.meals.filter((_, i) => i !== index);
+    const newTotalCalories = (todayLog.totalCalories || 0) - mealToDelete.calories;
+
+    try {
+      const logRef = doc(db, 'users', user.uid, 'dailyLogs', todayStr);
+      await updateDoc(logRef, {
+        meals: newMeals,
+        totalCalories: Math.max(0, newTotalCalories)
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/dailyLogs/${todayStr}`);
+    }
+  };
+
+  const deleteWorkout = async (index: number) => {
+    if (!todayLog) return;
+    const newWorkouts = todayLog.workouts.filter((_, i) => i !== index);
+
+    try {
+      const logRef = doc(db, 'users', user.uid, 'dailyLogs', todayStr);
+      await updateDoc(logRef, {
+        workouts: newWorkouts
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/dailyLogs/${todayStr}`);
+    }
+  };
+
+  const handleShareCard = async (elementId: string, filename: string) => {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    try {
+      // Temporarily hide buttons for the screenshot
+      const buttons = element.querySelectorAll('button');
+      buttons.forEach(b => (b as HTMLElement).style.display = 'none');
+
+      const dataUrl = await toPng(element, { 
+        backgroundColor: '#ffffff',
+        style: {
+          borderRadius: '24px',
+        }
+      });
+
+      // Restore buttons
+      buttons.forEach(b => (b as HTMLElement).style.display = '');
+
+      if (navigator.share) {
+        const blob = await (await fetch(dataUrl)).blob();
+        const file = new File([blob], `${filename}.png`, { type: 'image/png' });
+        await navigator.share({
+          files: [file],
+          title: 'My Health Progress',
+          text: `Check out my ${filename} for today!`,
+        });
+      } else {
+        // Fallback to download
+        const link = document.createElement('a');
+        link.download = `${filename}.png`;
+        link.href = dataUrl;
+        link.click();
+      }
+    } catch (error) {
+      console.error('Error sharing card:', error);
+    }
+  };
   
   // Scientific Calorie Calculation (Mifflin-St Jeor Equation)
   const calculateCalorieGoal = () => {
@@ -1158,10 +1499,25 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
   const netCalories = consumed - (burnedCalories + loggedBurned);
   const remaining = calorieGoal - netCalories;
   
-  const [showSportsEditor, setShowSportsEditor] = useState(false);
-  const [showWeightModal, setShowWeightModal] = useState(false);
-  const [newWeight, setNewWeight] = useState(user.weight?.toString() || '');
   const [updating, setUpdating] = useState(false);
+  const [showDailyReward, setShowDailyReward] = useState(false);
+
+  useEffect(() => {
+    const checkDailyReward = async () => {
+      const today = new Date().toISOString().split('T')[0];
+      if (user.lastDailyReward !== today) {
+        setShowDailyReward(true);
+        const newCredits = (user.credits || 0) + 10;
+        const updates = {
+          credits: newCredits,
+          lastDailyReward: today
+        };
+        await updateDoc(doc(db, 'users', user.uid), updates);
+        onUpdate({ ...user, ...updates });
+      }
+    };
+    checkDailyReward();
+  }, []);
 
   useEffect(() => {
     // Load data from today's log if exists
@@ -1170,61 +1526,12 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
       setSteps(todayLog.fitSteps || 0);
       setDistance(todayLog.fitDistance || 0);
       setActiveMinutes(todayLog.fitActiveMinutes || 0);
-      setAppleSteps(todayLog.appleSteps || 0);
-      setAppleCalories(todayLog.appleCalories || 0);
-      setAppleHeartRate(todayLog.appleHeartRate || 0);
     }
     
     if (user.googleFitTokens) {
       syncGoogleFit();
     }
   }, [user.googleFitTokens, todayLog]);
-
-  const syncAppleHealth = async () => {
-    setIsSyncingApple(true);
-    // Simulate Apple Health Sync (In a real iOS app, this would call HealthKit)
-    // For this web demo, we'll generate realistic data based on the time of day
-    setTimeout(async () => {
-      const hoursPassed = new Date().getHours();
-      const baseSteps = 500 * hoursPassed;
-      const randomSteps = Math.floor(Math.random() * 1000);
-      const totalSteps = baseSteps + randomSteps;
-      const totalCalories = Math.round(totalSteps * 0.04);
-      const avgHeartRate = 70 + Math.floor(Math.random() * 20);
-
-      setAppleSteps(totalSteps);
-      setAppleCalories(totalCalories);
-      setAppleHeartRate(avgHeartRate);
-
-      try {
-        const logRef = doc(db, 'users', user.uid, 'dailyLogs', todayStr);
-        const logDoc = await getDoc(logRef);
-        if (logDoc.exists()) {
-          await updateDoc(logRef, {
-            appleSteps: totalSteps,
-            appleCalories: totalCalories,
-            appleHeartRate: avgHeartRate
-          });
-        } else {
-          await setDoc(logRef, {
-            date: todayStr,
-            meals: [],
-            totalCalories: 0,
-            exercise: '',
-            waterIntake: 0,
-            weight: user.weight || 0,
-            appleSteps: totalSteps,
-            appleCalories: totalCalories,
-            appleHeartRate: avgHeartRate
-          });
-        }
-      } catch (error) {
-        console.error("Error saving Apple Health data:", error);
-      } finally {
-        setIsSyncingApple(false);
-      }
-    }, 1500);
-  };
 
   const syncGoogleFit = async () => {
     if (!user.googleFitTokens) return;
@@ -1248,47 +1555,78 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
       if (response.ok) {
         const data = await response.json();
         // Extract data from aggregate buckets
-        const bucket = data.bucket?.[0];
-        if (bucket) {
-          const calories = bucket.dataset?.[0]?.point?.[0]?.value?.[0]?.fpVal || 0;
-          const stepsVal = bucket.dataset?.[1]?.point?.[0]?.value?.[0]?.intVal || 0;
-          const distanceVal = bucket.dataset?.[2]?.point?.[0]?.value?.[0]?.fpVal || 0;
-          const activeMinsVal = bucket.dataset?.[3]?.point?.[0]?.value?.[0]?.intVal || 0;
-          
-          setBurnedCalories(Math.round(calories));
-          setSteps(stepsVal);
-          setDistance(distanceVal);
-          setActiveMinutes(activeMinsVal);
+        let totalCalories = 0;
+        let totalSteps = 0;
+        let totalActiveMins = 0;
 
-          // Save to daily log
-          const todayStr = new Date().toISOString().split('T')[0];
-          const logRef = doc(db, 'users', user.uid, 'dailyLogs', todayStr);
-          const logDoc = await getDoc(logRef);
-          if (logDoc.exists()) {
-            await updateDoc(logRef, {
-              fitCalories: Math.round(calories),
-              fitSteps: stepsVal,
-              fitDistance: distanceVal,
-              fitActiveMinutes: activeMinsVal
+        if (data.bucket && Array.isArray(data.bucket)) {
+          data.bucket.forEach((b: any) => {
+            // Calories (index 0)
+            b.dataset?.[0]?.point?.forEach((p: any) => {
+              totalCalories += p.value?.[0]?.fpVal || 0;
             });
-          } else {
-            await setDoc(logRef, {
-              date: todayStr,
-              meals: [],
-              totalCalories: 0,
-              exercise: '',
-              waterIntake: 0,
-              weight: user.weight || 0,
-              fitCalories: Math.round(calories),
-              fitSteps: stepsVal,
-              fitDistance: distanceVal,
-              fitActiveMinutes: activeMinsVal
+            // Steps (index 1)
+            b.dataset?.[1]?.point?.forEach((p: any) => {
+              totalSteps += p.value?.[0]?.intVal || 0;
             });
-          }
+            // Active Minutes (index 2)
+            b.dataset?.[2]?.point?.forEach((p: any) => {
+              totalActiveMins += p.value?.[0]?.intVal || 0;
+            });
+          });
+        }
+
+        // Estimate distance from steps (average 0.762 meters per step)
+        const distanceVal = totalSteps * 0.762;
+        
+        setBurnedCalories(Math.round(totalCalories));
+        setSteps(totalSteps);
+        setDistance(distanceVal);
+        setActiveMinutes(totalActiveMins);
+
+        // Save to daily log
+        const todayStr = new Date().toISOString().split('T')[0];
+        const logRef = doc(db, 'users', user.uid, 'dailyLogs', todayStr);
+        const logDoc = await getDoc(logRef);
+        if (logDoc.exists()) {
+          await updateDoc(logRef, {
+            fitCalories: Math.round(totalCalories),
+            fitSteps: totalSteps,
+            fitDistance: distanceVal,
+            fitActiveMinutes: totalActiveMins
+          });
+        } else {
+          await setDoc(logRef, {
+            date: todayStr,
+            meals: [],
+            totalCalories: 0,
+            exercise: '',
+            waterIntake: 0,
+            weight: user.weight || 0,
+            fitCalories: Math.round(totalCalories),
+            fitSteps: totalSteps,
+            fitDistance: distanceVal,
+            fitActiveMinutes: totalActiveMins
+          });
+        }
+      } else {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { message: errorText };
+        }
+        console.error("Google Fit Sync Error:", errorData);
+        alert("Failed to sync Google Fit data. You may need to reconnect your account.");
+        // If tokens are invalid, we might want to prompt the user to reconnect
+        if (response.status === 401 || response.status === 403) {
+           await updateDoc(doc(db, 'users', user.uid), { googleFitTokens: null });
         }
       }
     } catch (error) {
       console.error("Error syncing Google Fit:", error);
+      alert("An error occurred while trying to sync Google Fit data.");
     } finally {
       setIsSyncingFit(false);
     }
@@ -1306,6 +1644,20 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
+  const [showStepsModal, setShowStepsModal] = useState(false);
+  const [manualSteps, setManualSteps] = useState('');
+
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_FIT_AUTH_SUCCESS') {
+        const { tokens } = event.data;
+        await updateDoc(doc(db, 'users', user.uid), { googleFitTokens: tokens });
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [user.uid]);
+
   if (currentPath === '/privacy') {
     return (
       <div className="min-h-screen bg-white p-8 max-w-3xl mx-auto text-slate-700">
@@ -1318,7 +1670,7 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
         <p className="mb-4">We use this data solely to display your health progress within the app and to provide AI-powered health recommendations. We do not sell or share your personal health data with third parties.</p>
         <h2 className="text-xl font-bold mt-6 mb-4">3. Data Security</h2>
         <p className="mb-4">Your data is stored securely using Firebase and is only accessible by you through your authenticated account.</p>
-        <button onClick={() => { window.history.pushState({}, '', '/'); setCurrentPath('/'); }} className="mt-8 px-6 py-2 bg-emerald-600 text-white rounded-lg">Back to App</button>
+        <button onClick={() => { window.history.pushState({}, '', '/'); setCurrentPath('/'); }} className="mt-8 px-6 py-2 bg-primary-600 text-white rounded-lg">Back to App</button>
       </div>
     );
   }
@@ -1333,12 +1685,10 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
         <p className="mb-4">You must follow any policies made available to you within the Service. You are responsible for maintaining the confidentiality of your account.</p>
         <h2 className="text-xl font-bold mt-6 mb-4">2. Health Disclaimer</h2>
         <p className="mb-4">NABD is for informational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of your physician.</p>
-        <button onClick={() => { window.history.pushState({}, '', '/'); setCurrentPath('/'); }} className="mt-8 px-6 py-2 bg-emerald-600 text-white rounded-lg">Back to App</button>
+        <button onClick={() => { window.history.pushState({}, '', '/'); setCurrentPath('/'); }} className="mt-8 px-6 py-2 bg-primary-600 text-white rounded-lg">Back to App</button>
       </div>
     );
   }
-
-  const [showSleepTips, setShowSleepTips] = useState(false);
 
   const connectGoogleFit = async () => {
     try {
@@ -1352,35 +1702,24 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
         if (errorData.error?.includes("credentials are not configured")) {
           setShowFitGuide(true);
         } else {
-          alert("خطأ في الاتصال بجوجل فيت: " + (errorData.error || "خطأ غير معروف"));
+          alert("Google Fit connection error: " + (errorData.error || "Unknown error"));
         }
         return;
       }
       const { url } = await response.json();
       if (!url) {
-        alert("لم يتم العثور على رابط المصادقة. يرجى مراجعة إعدادات الخادم.");
+        alert("Authentication URL not found. Please check server settings.");
         return;
       }
       const authWindow = window.open(url, 'google_fit_auth', 'width=600,height=700');
       if (!authWindow) {
-        alert("تم حظر النافذة المنبثقة. يرجى السماح بالنوافذ المنبثقة لهذا الموقع.");
+        alert("Popup blocked. Please allow popups for this site.");
       }
     } catch (error) {
       console.error("Error getting auth URL:", error);
-      alert("حدث خطأ أثناء محاولة الاتصال بجوجل فيت.");
+      alert("An error occurred while trying to connect to Google Fit.");
     }
   };
-
-  useEffect(() => {
-    const handleMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'GOOGLE_FIT_AUTH_SUCCESS') {
-        const { tokens } = event.data;
-        await updateDoc(doc(db, 'users', user.uid), { googleFitTokens: tokens });
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [user.uid]);
 
   const handleWaterClick = async () => {
     if (updating) return;
@@ -1410,9 +1749,6 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
     }
   };
 
-  const [showStepsModal, setShowStepsModal] = useState(false);
-  const [manualSteps, setManualSteps] = useState('');
-
   const handleManualStepsUpdate = async () => {
     if (!manualSteps) return;
     setUpdating(true);
@@ -1431,146 +1767,116 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
       setUpdating(false);
     }
   };
-  const handleWeightUpdate = async () => {
-    if (updating || !newWeight) return;
-    setUpdating(true);
-    try {
-      const weightNum = parseFloat(newWeight);
-      await updateDoc(doc(db, 'users', user.uid), { weight: weightNum });
-      
-      const logRef = doc(db, 'users', user.uid, 'dailyLogs', todayStr);
-      const logDoc = await getDoc(logRef);
-      if (logDoc.exists()) {
-        await updateDoc(logRef, { weight: weightNum });
-      }
-      setShowWeightModal(false);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const getWeightLastUpdated = () => {
-    if (!latestLog?.date) return 'Not updated yet';
-    const lastDate = new Date(latestLog.date);
-    const today = new Date();
-    const diffTime = Math.abs(today.getTime() - lastDate.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 0) return 'Updated today';
-    if (diffDays === 1) return 'Updated yesterday';
-    return `Last updated ${diffDays} days ago`;
-  };
 
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-8"
+      className="space-y-4 md:space-y-6 pb-20"
     >
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Welcome back, {user.displayName.split(' ')[0]}!</h1>
-          <p className="text-slate-500">Here's your health overview for today.</p>
+          <h1 className="text-2xl md:text-4xl font-display font-bold text-slate-900 leading-tight">Welcome back, {user.displayName.split(' ')[0]}!</h1>
+          <p className="text-sm md:text-base text-slate-500 font-medium">Here's your holistic health overview for today.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
           {user.googleFitTokens ? (
             <Button 
               variant="outline" 
+              size="sm"
               onClick={syncGoogleFit} 
               disabled={isSyncingFit}
-              className="bg-white border-emerald-100 text-emerald-700"
+              className="bg-white border-primary-100 text-primary-700 hover:bg-primary-50 text-xs md:text-sm"
             >
-              <RefreshCw size={18} className={cn("mr-2", isSyncingFit && "animate-spin")} />
-              {isSyncingFit ? 'Syncing...' : 'Sync Google Fit'}
+              <RefreshCw size={14} className={cn("mr-1 md:mr-2", isSyncingFit && "animate-spin")} />
+              {isSyncingFit ? 'Syncing...' : 'Google Fit'}
             </Button>
           ) : (
             <Button 
               variant="primary" 
+              size="sm"
               onClick={connectGoogleFit}
-              className="bg-emerald-600 text-white"
+              className="bg-primary-600 text-white hover:bg-primary-700 shadow-lg shadow-primary-200 text-xs md:text-sm"
             >
-              <Activity size={18} className="mr-2" />
+              <Activity size={14} className="mr-1 md:mr-2" />
               Connect Google Fit
             </Button>
           )}
-          
-          <Button 
-            variant="outline" 
-            onClick={syncAppleHealth} 
-            disabled={isSyncingApple}
-            className="bg-white border-emerald-100 text-emerald-700"
-          >
-            <RefreshCw size={18} className={cn("mr-2", isSyncingApple && "animate-spin")} />
-            {isSyncingApple ? 'Syncing Apple...' : 'Sync Apple Health'}
-          </Button>
 
           <Button 
             variant="outline" 
+            size="sm"
             onClick={() => onTabChange('nutrition')}
-            className="bg-white border-emerald-100 text-emerald-700"
+            className="bg-white border-primary-100 text-primary-700 text-xs md:text-sm"
           >
-            <RefreshCw size={18} className="mr-2" />
-            Get New Plan
+            <RefreshCw size={14} className="mr-1 md:mr-2" />
+            New Plan
           </Button>
 
-          <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-emerald-50 shadow-sm">
-            <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-              <Calendar size={20} />
+          <div className="flex items-center gap-2 bg-white p-1.5 md:p-2 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm">
+            <div className="w-8 h-8 md:w-10 md:h-10 bg-primary-50 text-primary-600 rounded-lg md:rounded-xl flex items-center justify-center">
+              <Calendar size={16} />
             </div>
-            <div className="pr-4">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Today</p>
-              <p className="text-sm font-bold text-slate-900">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+            <div className="pr-2 md:pr-4">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Today</p>
+              <p className="text-xs md:text-sm font-bold text-slate-900">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
         {/* Calories Card */}
         <Card 
-          className="p-6 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-emerald-200 transition-all group hover:shadow-lg hover:shadow-emerald-100/50"
+          id="calories-card"
+          className="p-4 md:p-5 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-accent-200 transition-all group hover:shadow-lg hover:shadow-accent-100/50"
           onClick={() => onTabChange('nutrition')}
         >
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Calories</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Fuel & Energy</p>
               <div className="flex gap-2">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleShareCard('calories-card', 'Daily-Calories'); }}
+                  className="w-8 h-8 rounded-full bg-accent-50 flex items-center justify-center text-accent-600 hover:bg-accent-600 hover:text-white transition-colors"
+                  title="Share Progress"
+                >
+                  <Share2 size={16} />
+                </button>
                 {user.googleFitTokens ? (
                   <button 
                     onClick={(e) => { e.stopPropagation(); syncGoogleFit(); }}
-                    className={cn("w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors", isSyncingFit && "animate-spin")}
+                    className={cn("w-8 h-8 rounded-full bg-accent-50 flex items-center justify-center text-accent-600 hover:bg-accent-600 hover:text-white transition-colors", isSyncingFit && "animate-spin")}
                   >
                     <Activity size={16} />
                   </button>
                 ) : (
                   <button 
                     onClick={(e) => { e.stopPropagation(); connectGoogleFit(); }}
-                    className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-600 hover:text-white transition-colors"
+                    className="px-2 py-1 bg-accent-50 text-accent-600 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-accent-600 hover:text-white transition-colors"
                   >
-                    Connect Fit
+                    Connect Google Fit
                   </button>
                 )}
-                <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                <div className="w-8 h-8 rounded-full bg-accent-50 flex items-center justify-center text-accent-600 group-hover:bg-accent-600 group-hover:text-white transition-colors">
                   <Plus size={16} />
                 </div>
               </div>
             </div>
             <div className="flex items-baseline gap-1 mb-1">
-              <h3 className="text-4xl font-bold text-slate-900">{consumed}</h3>
+              <h3 className="text-4xl font-display font-bold text-slate-900">{consumed}</h3>
               <span className="text-lg font-medium text-slate-400">/ {calorieGoal}</span>
             </div>
             {(burnedCalories > 0 || loggedBurned > 0) && (
               <div className="mb-4 space-y-1">
                 {burnedCalories > 0 && (
-                  <p className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                  <p className="text-xs font-bold text-accent-600 flex items-center gap-1">
                     <Activity size={12} />
                     -{burnedCalories} kcal (Google Fit)
                   </p>
                 )}
                 {loggedBurned > 0 && (
-                  <p className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                  <p className="text-xs font-bold text-accent-600 flex items-center gap-1">
                     <Dumbbell size={12} />
                     -{loggedBurned} kcal (Logged Workouts)
                   </p>
@@ -1581,39 +1887,33 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
               <motion.div 
                 initial={{ width: 0 }}
                 animate={{ width: `${Math.min((netCalories/calorieGoal)*100, 100)}%` }}
-                className="h-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.4)]"
+                className="h-full bg-accent-500 shadow-[0_0_12px_rgba(244,63,94,0.4)]"
               />
             </div>
             <div className="space-y-2">
               <p className="text-sm text-slate-600 font-semibold flex items-center gap-1.5">
-                <TrendingUp size={14} className="text-emerald-500" />
+                <TrendingUp size={14} className="text-accent-500" />
                 {remaining > 0 ? `${remaining} kcal remaining` : 'Daily goal achieved!'}
               </p>
-              <div className="p-2 bg-emerald-50/50 rounded-lg border border-emerald-100/50">
-                <p className="text-[10px] text-emerald-700 leading-tight font-medium">
-                  <span className="font-bold uppercase mr-1">Science:</span>
-                  Net calories = Consumed - Burned. Log workouts or connect Fit to track activity.
-                </p>
-              </div>
             </div>
           </div>
-          <Utensils className="absolute -bottom-6 -right-6 text-emerald-50 opacity-20 group-hover:scale-110 group-hover:rotate-12 transition-transform duration-500" size={140} />
+          <Utensils className="absolute -bottom-6 -right-6 text-accent-50 opacity-20 group-hover:scale-110 group-hover:rotate-12 transition-transform duration-500" size={140} />
         </Card>
 
         {/* Water Intake Card */}
         <Card 
-          className="p-6 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-blue-200 transition-all group hover:shadow-lg hover:shadow-blue-100/50"
+          className="p-4 md:p-5 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-primary-200 transition-all group hover:shadow-lg hover:shadow-primary-100/50"
           onClick={handleWaterClick}
         >
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Water Intake</p>
-              <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Hydration</p>
+              <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center text-primary-600 group-hover:bg-primary-600 group-hover:text-white transition-colors">
                 <Plus size={16} />
               </div>
             </div>
             <div className="flex items-baseline gap-1 mb-4">
-              <h3 className="text-4xl font-bold text-slate-900">{(todayLog?.waterIntake || 0).toFixed(2)}</h3>
+              <h3 className="text-4xl font-display font-bold text-slate-900">{(todayLog?.waterIntake || 0).toFixed(2)}</h3>
               <span className="text-lg font-medium text-slate-400">/ 2.5 L</span>
             </div>
             <div className="flex justify-between items-center mb-4 px-1">
@@ -1625,7 +1925,7 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
                   className={cn(
                     "w-2.5 h-2.5 rounded-full transition-all duration-500", 
                     i <= (todayLog?.waterIntake || 0) * 4 
-                      ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
+                      ? "bg-primary-500 shadow-[0_0_8px_rgba(37,99,235,0.5)]" 
                       : "bg-slate-200"
                   )} 
                 />
@@ -1633,271 +1933,178 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
             </div>
             <div className="space-y-2">
               <p className="text-sm text-slate-600 font-semibold">Click to add 250ml (1 cup)</p>
-              <div className="p-2 bg-blue-50/50 rounded-lg border border-blue-100/50">
-                <p className="text-[10px] text-blue-700 leading-tight font-medium">
-                  <span className="font-bold uppercase mr-1">Research:</span>
-                  Optimal hydration improves cognitive function and physical endurance.
-                </p>
-              </div>
             </div>
           </div>
-          <Droplets className="absolute -bottom-6 -right-6 text-blue-50 opacity-20 group-hover:scale-110 group-hover:-rotate-12 transition-transform duration-500" size={140} />
+          <Droplets className="absolute -bottom-6 -right-6 text-primary-50 opacity-20 group-hover:scale-110 group-hover:-rotate-12 transition-transform duration-500" size={140} />
           {updating && (
             <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] flex items-center justify-center z-20">
-              <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <div className="w-6 h-6 border-3 border-primary-500 border-t-transparent rounded-full animate-spin" />
             </div>
           )}
         </Card>
 
-        {/* Weight Card */}
-        <Card 
-          className="p-6 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-emerald-200 transition-all group hover:shadow-lg hover:shadow-emerald-100/50"
-          onClick={() => setShowWeightModal(true)}
-        >
+        {/* Steps Card */}
+        <Card className="p-4 md:p-5 flex flex-col justify-between relative overflow-hidden transition-all group hover:shadow-lg hover:shadow-primary-100/50">
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Weight</p>
-              <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <Settings size={16} />
-              </div>
-            </div>
-            <div className="flex items-baseline gap-1 mb-4">
-              <h3 className="text-4xl font-bold text-slate-900">{user.weight}</h3>
-              <span className="text-lg font-medium text-slate-400">kg</span>
-            </div>
-            <div className="h-14 w-full mb-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={logs.slice(0, 7).reverse()}>
-                  <defs>
-                    <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <Area 
-                    type="monotone" 
-                    dataKey="weight" 
-                    stroke="#10b981" 
-                    fillOpacity={1} 
-                    fill="url(#colorWeight)" 
-                    strokeWidth={3} 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm text-slate-600 font-semibold">{getWeightLastUpdated()}</p>
-              <div className="p-2 bg-emerald-50/50 rounded-lg border border-emerald-100/50">
-                <p className="text-[10px] text-emerald-700 leading-tight font-medium">
-                  <span className="font-bold uppercase mr-1">Tip:</span>
-                  Consistent daily weighing helps track true biological trends.
-                </p>
-              </div>
-            </div>
-          </div>
-          <WeightIcon className="absolute -bottom-6 -right-6 text-emerald-50 opacity-20 group-hover:scale-110 transition-transform duration-500" size={140} />
-        </Card>
-
-        {/* Smart Plan Card */}
-        {user.targetWeight && user.targetDate ? (
-          <Card 
-            className="p-6 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-emerald-200 transition-all group hover:shadow-lg hover:shadow-emerald-100/50"
-            onClick={() => onTabChange('plans')}
-          >
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Smart Plan</p>
-                <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                  <Target size={16} />
-                </div>
-              </div>
-              <div className="flex items-baseline gap-1 mb-1">
-                <h3 className="text-4xl font-bold text-slate-900">{user.targetWeight}</h3>
-                <span className="text-lg font-medium text-slate-400">kg Goal</span>
-              </div>
-              <p className="text-xs font-bold text-slate-500 mb-4">
-                Target Date: {new Date(user.targetDate).toLocaleDateString()}
-              </p>
-              
-              <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden mb-4">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min(Math.max((user.weight! / user.targetWeight) * 100, 0), 100)}%` }}
-                  className="h-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.4)]"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <p className="text-sm text-slate-600 font-semibold flex items-center gap-1.5">
-                  <TrendingUp size={14} className="text-emerald-500" />
-                  {Math.abs(user.targetWeight - user.weight!).toFixed(1)} kg to go
-                </p>
-              </div>
-            </div>
-            <Target className="absolute -bottom-6 -right-6 text-emerald-50 opacity-20 group-hover:scale-110 transition-transform duration-500" size={140} />
-          </Card>
-        ) : (
-          <Card 
-            className="p-6 flex flex-col justify-center items-center relative overflow-hidden cursor-pointer hover:border-emerald-200 transition-all group hover:shadow-lg hover:shadow-emerald-100/50 bg-emerald-50/30 border-dashed border-emerald-200"
-            onClick={() => onTabChange('plans')}
-          >
-            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-3">
-              <Target size={24} />
-            </div>
-            <h3 className="font-bold text-slate-800">Set a Smart Plan</h3>
-            <p className="text-xs text-slate-500 text-center mt-1">Reach your target weight with a scientific plan</p>
-          </Card>
-        )}
-
-        {/* Activity Card */}
-        <Card className="p-6 flex flex-col justify-between relative overflow-hidden transition-all group hover:shadow-lg hover:shadow-orange-100/50">
-          <div className="relative z-10">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Activity</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Activity</p>
               <div className="flex gap-2">
                 <button 
                   onClick={(e) => { e.stopPropagation(); setShowStepsModal(true); }}
-                  className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 hover:bg-orange-600 hover:text-white transition-colors"
+                  className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center text-primary-600 hover:bg-primary-600 hover:text-white transition-colors"
                   title="Add Steps Manually"
                 >
                   <Plus size={16} />
                 </button>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); syncAppleHealth(); }}
-                  className={cn("w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-600 hover:bg-red-600 hover:text-white transition-colors", isSyncingApple && "animate-spin")}
-                  title="Sync Apple Health"
-                >
-                  <Heart size={16} />
-                </button>
-                <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center text-orange-600">
+                <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center text-primary-600">
                   <Activity size={16} />
                 </div>
               </div>
             </div>
-            <div className="space-y-4 mb-4">
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase">Total Steps</p>
-                <div className="flex items-baseline gap-1">
-                  <h3 className="text-2xl font-bold text-slate-900">{(steps + appleSteps).toLocaleString()}</h3>
-                </div>
-                {appleSteps > 0 && (
-                  <p className="text-[10px] font-bold text-red-500 flex items-center gap-1">
-                    <Heart size={10} />
-                    {appleSteps.toLocaleString()} from Apple Health
-                  </p>
-                )}
-                {steps > 0 && (
-                  <p className="text-[10px] font-bold text-orange-500 flex items-center gap-1">
-                    <Activity size={10} />
-                    {steps.toLocaleString()} from Google Fit
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase">Distance</p>
-                  <p className="text-lg font-bold text-slate-900">{(distance / 1000).toFixed(2)} <span className="text-sm font-medium text-slate-400">km</span></p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase">Heart Rate</p>
-                  <p className="text-lg font-bold text-slate-900">{appleHeartRate || '--'} <span className="text-sm font-medium text-slate-400">bpm</span></p>
-                </div>
-              </div>
+            
+            <div className="flex items-baseline gap-1 mb-4 mt-2">
+              <h3 className="text-5xl font-display font-black text-slate-900 tracking-tighter">{steps.toLocaleString()}</h3>
+              <span className="text-lg font-medium text-slate-400">steps</span>
             </div>
-            <div className="space-y-2">
-              <div className="p-2 bg-orange-50/50 rounded-lg border border-orange-100/50">
-                <p className="text-[10px] text-orange-700 leading-tight font-medium">
-                  <span className="font-bold uppercase mr-1">Sync:</span>
-                  Combined data from Google Fit and Apple Health.
+
+            <div className="space-y-2 mb-4">
+              {steps > 0 && (
+                <p className="text-xs font-bold text-primary-500 flex items-center gap-1">
+                  <Activity size={12} />
+                  {steps.toLocaleString()} from Google Fit
                 </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 mb-4">
+              <div className="bg-slate-50 p-2 rounded-xl">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Distance</p>
+                <p className="text-sm font-bold text-slate-900">{(distance / 1000).toFixed(2)} <span className="text-[10px] font-medium text-slate-400">km</span></p>
               </div>
             </div>
           </div>
-          <Activity className="absolute -bottom-6 -right-6 text-orange-50 opacity-20 group-hover:scale-110 transition-transform duration-500" size={140} />
+          <Activity className="absolute -bottom-6 -right-6 text-primary-50 opacity-20 group-hover:scale-110 transition-transform duration-500" size={140} />
+        </Card>
+      </div>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Meals */}
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                <Utensils size={20} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">Recent Meals</h3>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => onTabChange('nutrition')}
+              className="text-xs font-bold"
+            >
+              View All
+            </Button>
+          </div>
+
+          <div className="space-y-4">
+            {todayLog?.meals && todayLog.meals.length > 0 ? (
+              todayLog.meals.slice(-3).reverse().map((meal, idx) => (
+                <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl group hover:bg-white hover:shadow-md transition-all border border-transparent hover:border-slate-100">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm text-emerald-500">
+                      {meal.type === 'breakfast' ? <Zap size={20} /> : 
+                       meal.type === 'lunch' ? <Utensils size={20} /> : 
+                       meal.type === 'dinner' ? <Moon size={20} /> : <Activity size={20} />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-900">{meal.name}</p>
+                      <p className="text-xs text-slate-500 font-medium capitalize">{meal.type} • {meal.calories} kcal</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => deleteMeal(todayLog.meals.length - 1 - idx)}
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                    title="Delete Meal"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-slate-400 text-sm font-medium">No meals logged today</p>
+                <Button 
+                  variant="ghost" 
+                  className="text-emerald-600 font-bold mt-2"
+                  onClick={() => onTabChange('nutrition')}
+                >
+                  Log your first meal
+                </Button>
+              </div>
+            )}
+          </div>
         </Card>
 
-        {/* Sleep Card */}
-        <Card 
-          className="p-6 flex flex-col justify-between relative overflow-hidden cursor-pointer hover:border-indigo-200 transition-all group hover:shadow-lg hover:shadow-indigo-100/50"
-          onClick={() => onTabChange('sleep')}
-        >
-          <div className="relative z-10">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Sleep</p>
-              <div className="flex gap-2">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowSleepTips(true); }}
-                  className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors"
-                  title="Sleep Tips"
-                >
-                  <Lightbulb size={16} />
-                </button>
-                <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
-                  <Moon size={16} />
-                </div>
+        {/* Recent Workouts */}
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-primary-50 text-primary-600 rounded-xl flex items-center justify-center">
+                <Dumbbell size={20} />
               </div>
+              <h3 className="text-lg font-bold text-slate-900">Recent Workouts</h3>
             </div>
-            <div className="flex items-baseline gap-1 mb-4">
-              <h3 className="text-4xl font-bold text-slate-900">
-                {todayLog?.sleepDuration ? Math.floor(todayLog.sleepDuration / 60) : '--'}
-              </h3>
-              <span className="text-lg font-medium text-slate-400">h</span>
-              <h3 className="text-4xl font-bold text-slate-900 ml-1">
-                {todayLog?.sleepDuration ? todayLog.sleepDuration % 60 : '--'}
-              </h3>
-              <span className="text-lg font-medium text-slate-400">m</span>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm text-slate-600 font-semibold">
-                Quality: <span className="text-indigo-600 font-bold capitalize">{todayLog?.sleepQuality || 'Not logged'}</span>
-              </p>
-              <div className="p-2 bg-indigo-50/50 rounded-lg border border-indigo-100/50">
-                <p className="text-[10px] text-indigo-700 leading-tight font-medium">
-                  <span className="font-bold uppercase mr-1">Science:</span>
-                  Sleep cycles are 90 mins. Use the smart calculator for optimal rest.
-                </p>
-              </div>
-            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => onTabChange('sports')}
+              className="text-xs font-bold"
+            >
+              View All
+            </Button>
           </div>
-          <Moon className="absolute -bottom-6 -right-6 text-indigo-50 opacity-20 group-hover:scale-110 transition-transform duration-500" size={140} />
+
+          <div className="space-y-4">
+            {todayLog?.workouts && todayLog.workouts.length > 0 ? (
+              todayLog.workouts.slice(-3).reverse().map((workout, idx) => (
+                <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl group hover:bg-white hover:shadow-md transition-all border border-transparent hover:border-slate-100">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm text-primary-500">
+                      <Activity size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-900">{workout.name}</p>
+                      <p className="text-xs text-slate-500 font-medium">{workout.duration} min • {workout.caloriesBurned} kcal</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => deleteWorkout(todayLog.workouts.length - 1 - idx)}
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                    title="Delete Workout"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-slate-400 text-sm font-medium">No workouts logged today</p>
+                <Button 
+                  variant="ghost" 
+                  className="text-primary-600 font-bold mt-2"
+                  onClick={() => onTabChange('sports')}
+                >
+                  Log your first workout
+                </Button>
+              </div>
+            )}
+          </div>
         </Card>
       </div>
 
-      {/* Weight Update Modal */}
+      {/* Modals */}
       <AnimatePresence>
-        {showWeightModal && (
-          <div className="fixed inset-0 z-[110] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl"
-            >
-              <h3 className="text-xl font-bold text-slate-900 mb-6">Update Weight</h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Current Weight (kg)</label>
-                  <input 
-                    type="number" 
-                    step="0.1"
-                    value={newWeight}
-                    onChange={e => setNewWeight(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-lg"
-                    placeholder="e.g. 75.5"
-                    autoFocus
-                  />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <Button variant="outline" className="flex-1" onClick={() => setShowWeightModal(false)}>Cancel</Button>
-                  <Button className="flex-1" onClick={handleWeightUpdate} disabled={updating}>
-                    {updating ? 'Saving...' : 'Save'}
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
         {showStepsModal && (
           <div className="fixed inset-0 z-[110] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
             <motion.div 
@@ -1914,82 +2121,18 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
                     type="number" 
                     value={manualSteps}
                     onChange={e => setManualSteps(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-orange-500 outline-none font-bold text-lg"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none font-bold text-lg"
                     placeholder="e.g. 10000"
                     autoFocus
                   />
                 </div>
                 <div className="flex gap-3 pt-2">
                   <Button variant="outline" className="flex-1" onClick={() => setShowStepsModal(false)}>Cancel</Button>
-                  <Button className="flex-1 bg-orange-600 hover:bg-orange-700 text-white border-none" onClick={handleManualStepsUpdate} disabled={updating}>
+                  <Button className="flex-1 bg-primary-600 hover:bg-primary-700 text-white border-none" onClick={handleManualStepsUpdate} disabled={updating}>
                     {updating ? 'Saving...' : 'Save'}
                   </Button>
                 </div>
               </div>
-            </motion.div>
-          </div>
-        )}
-
-        {showSleepTips && (
-          <div className="fixed inset-0 z-[110] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-slate-900">نصائح لتحسين جودة النوم</h3>
-                <button onClick={() => setShowSleepTips(false)} className="p-2 hover:bg-slate-100 rounded-full">
-                  <X size={20} />
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="flex gap-3 p-3 bg-indigo-50 rounded-2xl">
-                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-indigo-600 shrink-0 shadow-sm">
-                    <Clock size={20} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-indigo-900 text-sm">التزم بجدول ثابت</h4>
-                    <p className="text-xs text-indigo-700">اذهب للنوم واستيقظ في نفس الوقت يومياً، حتى في عطلات نهاية الأسبوع.</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 p-3 bg-blue-50 rounded-2xl">
-                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-blue-600 shrink-0 shadow-sm">
-                    <MonitorOff size={20} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-blue-900 text-sm">ابتعد عن الشاشات</h4>
-                    <p className="text-xs text-blue-700">تجنب الضوء الأزرق من الهواتف والأجهزة قبل النوم بـ 60 دقيقة على الأقل.</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 p-3 bg-slate-50 rounded-2xl">
-                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-slate-600 shrink-0 shadow-sm">
-                    <Coffee size={20} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-sm">راقب كافيين المساء</h4>
-                    <p className="text-xs text-slate-700">تجنب الكافيين والوجبات الثقيلة قبل النوم بـ 4-6 ساعات.</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 p-3 bg-emerald-50 rounded-2xl">
-                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-emerald-600 shrink-0 shadow-sm">
-                    <Wind size={20} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-emerald-900 text-sm">هيئ بيئة النوم</h4>
-                    <p className="text-xs text-emerald-700">تأكد من أن غرفتك مظلمة، هادئة، ودرجة حرارتها مائلة للبرودة.</p>
-                  </div>
-                </div>
-              </div>
-
-              <Button className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 text-white border-none" onClick={() => setShowSleepTips(false)}>
-                فهمت، سأحاول تطبيقها
-              </Button>
             </motion.div>
           </div>
         )}
@@ -2004,10 +2147,10 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
             >
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center">
+                  <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-2xl flex items-center justify-center">
                     <Activity size={24} />
                   </div>
-                  <h3 className="text-xl font-bold text-slate-900">إعداد جوجل فيت / Google Fit Setup</h3>
+                  <h3 className="text-xl font-bold text-slate-900">Google Fit Setup</h3>
                 </div>
                 <button onClick={() => setShowFitGuide(false)} className="p-2 hover:bg-slate-100 rounded-full">
                   <X size={20} />
@@ -2016,19 +2159,19 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
 
               <div className="space-y-6 text-slate-600">
                 <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
-                  <p className="text-sm font-bold text-amber-900 mb-2">⚠️ تنبيه هام:</p>
+                  <p className="text-sm font-bold text-amber-900 mb-2">⚠️ Important Note:</p>
                   <p className="text-sm text-amber-800">
-                    لم يتم العثور على مفاتيح الربط في إعدادات البرنامج. يجب عليك إضافتها يدوياً لمرة واحدة فقط.
+                    Connection keys not found in settings. You must add them manually once.
                   </p>
                 </div>
 
                 <div className="space-y-4">
-                  <h4 className="font-bold text-slate-900">الخطوات المطلوبة:</h4>
+                  <h4 className="font-bold text-slate-900">Required Steps:</h4>
                   <ol className="list-decimal list-inside space-y-3 text-sm">
-                    <li>اذهب إلى <a href="https://console.cloud.google.com/" target="_blank" className="text-blue-600 underline">Google Cloud Console</a> وأنشئ مشروعاً جديداً.</li>
-                    <li>فعل خدمة <b>Fitness API</b> من قسم Library.</li>
-                    <li>أنشئ <b>OAuth client ID</b> من نوع <b>Web application</b>.</li>
-                    <li>أضف هذا الرابط في خانة <b>Authorized redirect URIs</b> (تأكد من تطابقه تماماً):
+                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank" className="text-primary-600 underline">Google Cloud Console</a> and create a new project.</li>
+                    <li>Enable the <b>Fitness API</b> from the Library section.</li>
+                    <li>Create an <b>OAuth client ID</b> of type <b>Web application</b>.</li>
+                    <li>Add this URL to the <b>Authorized redirect URIs</b> (ensure it matches exactly):
                       <div className="mt-2 flex gap-2">
                         <div className="flex-1 p-2 bg-slate-100 rounded-lg font-mono text-[10px] break-all select-all border border-slate-200">
                           {serverRedirectUri || `${window.location.origin}/auth/google-fit/callback`}
@@ -2036,16 +2179,16 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
                         <button 
                           onClick={() => {
                             navigator.clipboard.writeText(serverRedirectUri || `${window.location.origin}/auth/google-fit/callback`);
-                            alert("تم نسخ الرابط!");
+                            alert("URL copied!");
                           }}
-                          className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors"
+                          className="px-3 py-1 bg-primary-600 text-white rounded-lg text-xs font-bold hover:bg-primary-700 transition-colors"
                         >
                           Copy
                         </button>
                       </div>
                     </li>
-                    <li>انسخ الـ <b>Client ID</b> والـ <b>Client Secret</b>.</li>
-                    <li>افتح قائمة <b>Settings &gt; Secrets</b> في هذا البرنامج وأضف:
+                    <li>Copy the <b>Client ID</b> and <b>Client Secret</b>.</li>
+                    <li>Open the <b>Settings &gt; Secrets</b> menu in this app and add:
                       <ul className="list-disc list-inside mt-2 ml-4">
                         <li><code>GOOGLE_FIT_CLIENT_ID</code></li>
                         <li><code>GOOGLE_FIT_CLIENT_SECRET</code></li>
@@ -2055,7 +2198,7 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
                 </div>
 
                 <Button variant="primary" className="w-full py-4" onClick={() => setShowFitGuide(false)}>
-                  فهمت، سأقوم بالإعداد الآن
+                  Got it, I'll set it up now
                 </Button>
               </div>
             </motion.div>
@@ -2063,295 +2206,42 @@ function Dashboard({ user, logs, onTabChange, onUpdate }: { user: UserProfile, l
         )}
       </AnimatePresence>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
-          <Card className="p-8">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-xl font-bold text-slate-900">Recent Meals</h3>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => onTabChange('nutrition')}>
-                  <Plus size={16} className="mr-1" />
-                  Log Meal
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => onTabChange('nutrition')}>View All</Button>
+      {/* Daily Reward Modal */}
+      <AnimatePresence>
+        {showDailyReward && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[40px] p-10 max-w-md w-full text-center shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-accent-500" />
+              <div className="w-24 h-24 bg-accent-100 text-accent-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+                <Zap size={48} fill="currentColor" />
               </div>
-            </div>
-            <div className="space-y-6">
-              {todayLog?.meals?.length ? todayLog.meals.map((meal, idx) => (
-                <div key={idx} className="flex items-center gap-4 group">
-                  <div className="w-16 h-16 rounded-2xl bg-slate-100 overflow-hidden border border-emerald-50">
-                    {meal.imageUrl ? <img src={meal.imageUrl} className="w-full h-full object-cover" /> : <Utensils className="w-full h-full p-4 text-slate-300" />}
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-slate-900">{meal.name}</h4>
-                    <p className="text-sm text-slate-500">{meal.calories} kcal • {meal.protein}g Protein</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Time</p>
-                    <p className="text-sm font-semibold text-slate-600">08:30 AM</p>
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-10 text-slate-400">
-                  <Apple size={48} className="mx-auto mb-4 opacity-20" />
-                  <p>No meals logged today yet.</p>
-                </div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="p-8 bg-emerald-900 text-white relative overflow-hidden">
-            <div className="relative z-10 h-full flex flex-col">
-              <h3 className="text-2xl font-bold mb-4">AI Health Tip</h3>
-              <p className="text-emerald-100 leading-relaxed mb-8">
-                "Based on your goal of muscle gain, try increasing your protein intake by 15g in your breakfast. Adding Greek yogurt or eggs would be a great scientific choice."
-              </p>
-              <div className="mt-auto">
-                <Button 
-                  variant="secondary" 
-                  className="bg-white text-emerald-900 hover:bg-emerald-50 border-none w-full"
-                  onClick={() => onTabChange('nutrition')}
-                >
-                  Get New Plan
-                  <ArrowRight size={18} className="ml-2" />
-                </Button>
-              </div>
-            </div>
-            <Activity className="absolute -bottom-10 -right-10 text-emerald-800 opacity-50" size={200} />
-          </Card>
-        </div>
-
-        <div className="space-y-8">
-          <Card className="p-8">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-slate-900">Recent Workouts</h3>
-              <Button variant="ghost" size="sm" onClick={() => onTabChange('sports')}>
-                <Plus size={16} className="mr-1" />
-                Log
-              </Button>
-            </div>
-            <div className="space-y-4">
-              {todayLog?.workouts?.length ? todayLog.workouts.map((workout, idx) => (
-                <div key={idx} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-4">
-                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
-                    <Dumbbell size={20} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-slate-900 truncate">{workout.name}</h4>
-                    <p className="text-xs text-slate-500">{workout.duration} mins • {workout.intensity}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-bold text-emerald-600">{workout.caloriesBurned} kcal</p>
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-6 text-slate-400">
-                  <Dumbbell size={32} className="mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">No workouts logged today.</p>
-                </div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="p-8">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-slate-900">My Sports</h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowSportsEditor(true)}>
-                <Settings size={16} />
-              </Button>
-            </div>
-            <div className="space-y-4">
-              {user.selectedSports?.length ? user.selectedSports.map(s => {
-                const sport = SPORTS_DATA.find(sd => sd.id === s.sportId);
-                return (
-                  <div key={s.sportId} className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center">
-                        {sport?.icon}
-                      </div>
-                      <h4 className="font-bold text-slate-900">{sport?.name}</h4>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {s.goalIds.map(goal => (
-                        <span key={goal} className="px-2 py-1 bg-white border border-slate-200 rounded-md text-[10px] font-medium text-slate-600">
-                          {goal}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }) : (
-                <div className="text-center py-6 text-slate-400">
-                  <p className="text-sm">No sports selected yet.</p>
-                  <Button variant="ghost" size="sm" onClick={() => setShowSportsEditor(true)} className="text-emerald-600">
-                    Add Sports
-                  </Button>
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      {showSportsEditor && (
-        <SportsEditor 
-          user={user} 
-          onUpdate={onUpdate}
-          onClose={() => setShowSportsEditor(false)} 
-        />
-      )}
+              <h3 className="text-3xl font-display font-black text-slate-900 mb-2">Daily Reward!</h3>
+              <p className="text-slate-500 mb-8">You've earned <span className="text-accent-600 font-bold">10 free points</span> to keep you motivated on your health journey.</p>
+              <button
+                onClick={() => setShowDailyReward(false)}
+                className="w-full py-4 bg-accent-600 text-white rounded-2xl font-bold text-lg hover:bg-accent-700 transition-all shadow-lg shadow-accent-200"
+              >
+                Awesome, thanks!
+              </button>
+              <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-accent-50 rounded-full blur-2xl" />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <footer className="mt-12 py-8 border-t border-slate-100 text-center">
         <p className="text-slate-400 text-sm mb-2">© 2026 NABD Health Platform</p>
         <div className="flex justify-center gap-4 text-xs font-medium text-slate-500">
-          <button onClick={() => { window.history.pushState({}, '', '/privacy'); setCurrentPath('/privacy'); }} className="hover:text-emerald-600 transition-colors">Privacy Policy</button>
-          <button onClick={() => { window.history.pushState({}, '', '/terms'); setCurrentPath('/terms'); }} className="hover:text-emerald-600 transition-colors">Terms of Service</button>
+          <button onClick={() => { window.history.pushState({}, '', '/privacy'); setCurrentPath('/privacy'); }} className="hover:text-primary-600 transition-colors">Privacy Policy</button>
+          <button onClick={() => { window.history.pushState({}, '', '/terms'); setCurrentPath('/terms'); }} className="hover:text-primary-600 transition-colors">Terms of Service</button>
         </div>
       </footer>
     </motion.div>
-  );
-}
-
-function SportsEditor({ user, onUpdate, onClose }: { user: UserProfile, onUpdate: (u: UserProfile) => void, onClose: () => void }) {
-  const [selectedSports, setSelectedSports] = useState<{ sportId: string, goalIds: string[] }[]>(user.selectedSports || []);
-  const [targetWeight, setTargetWeight] = useState<number | undefined>(user.targetWeight);
-  const [targetDate, setTargetDate] = useState<string | undefined>(user.targetDate);
-  const [saving, setSaving] = useState(false);
-
-  const toggleSport = (sportId: string) => {
-    const exists = selectedSports.find(s => s.sportId === sportId);
-    if (exists) {
-      setSelectedSports(selectedSports.filter(s => s.sportId !== sportId));
-    } else {
-      setSelectedSports([...selectedSports, { sportId, goalIds: [] }]);
-    }
-  };
-
-  const toggleGoal = (sportId: string, goalId: string) => {
-    const updated = selectedSports.map(s => {
-      if (s.sportId === sportId) {
-        const goals = s.goalIds.includes(goalId) 
-          ? s.goalIds.filter(g => g !== goalId)
-          : [...s.goalIds, goalId];
-        return { ...s, goalIds: goals };
-      }
-      return s;
-    });
-    setSelectedSports(updated);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const updates = { 
-        selectedSports,
-        targetWeight: targetWeight || null,
-        targetDate: targetDate || null
-      };
-      await updateDoc(doc(db, 'users', user.uid), updates);
-      onUpdate({ ...user, ...updates });
-      onClose();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl"
-      >
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-xl font-bold text-slate-900">Edit Sports & Goals</h3>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {SPORTS_DATA.map(sport => {
-            const isSelected = selectedSports.some(s => s.sportId === sport.id);
-            return (
-              <div key={sport.id} className="space-y-3">
-                <button
-                  onClick={() => toggleSport(sport.id)}
-                  className={cn(
-                    "w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left",
-                    isSelected ? "bg-emerald-50 border-emerald-600 text-emerald-900" : "border-slate-200 text-slate-600 hover:border-emerald-200"
-                  )}
-                >
-                  <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center", isSelected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500")}>
-                    {sport.icon}
-                  </div>
-                  <span className="font-semibold flex-1">{sport.name}</span>
-                  {isSelected && <CheckCircle2 size={20} className="text-emerald-600" />}
-                </button>
-                
-                {isSelected && (
-                  <div className="pl-14 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {sport.goals.map(goal => {
-                      const isGoalSelected = selectedSports.find(s => s.sportId === sport.id)?.goalIds.includes(goal);
-                      return (
-                        <button
-                          key={goal}
-                          onClick={() => toggleGoal(sport.id, goal)}
-                          className={cn(
-                            "text-left px-4 py-2 rounded-lg text-sm transition-all border",
-                            isGoalSelected ? "bg-emerald-100 border-emerald-300 text-emerald-800 font-medium" : "bg-white border-slate-100 text-slate-500 hover:bg-slate-50"
-                          )}
-                        >
-                          {goal}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          <div className="pt-6 border-t border-slate-100 space-y-4">
-            <h4 className="font-bold text-slate-900 flex items-center gap-2">
-              <Target size={18} className="text-emerald-600" />
-              Weight Goal Settings
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Target Weight (kg)</label>
-                <input 
-                  type="number"
-                  step="0.1"
-                  value={targetWeight || ''}
-                  onChange={(e) => setTargetWeight(parseFloat(e.target.value))}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all font-medium"
-                  placeholder="e.g. 75.0"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Target Date</label>
-                <input 
-                  type="date"
-                  value={targetDate || ''}
-                  onChange={(e) => setTargetDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all font-medium"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 border-t border-slate-100 flex gap-4">
-          <Button variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-          <Button onClick={handleSave} disabled={saving} className="flex-1">
-            {saving ? "Saving..." : "Save Changes"}
-          </Button>
-        </div>
-      </motion.div>
-    </div>
   );
 }
 
@@ -2369,11 +2259,16 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
     preferredExerciseSystem: user.preferredExerciseSystem,
     photoURL: user.photoURL,
     activityLevel: user.activityLevel,
+    notificationsEnabled: user.notificationsEnabled ?? true,
+    waterReminderInterval: user.waterReminderInterval ?? 60,
+    mealReminderEnabled: user.mealReminderEnabled ?? true,
   });
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2421,19 +2316,29 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
     }
   };
 
+  const handleDeleteAccount = async () => {
+    try {
+      await deleteDoc(doc(db, 'users', user.uid));
+      // Sign out after deletion
+      auth.signOut();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}`);
+    }
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="max-w-4xl mx-auto space-y-8"
+      className="max-w-4xl mx-auto space-y-4 md:space-y-6 pb-20"
     >
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-slate-900">Profile Settings</h1>
+        <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-900">Profile Settings</h1>
         {success && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2"
+            className="bg-primary-100 text-primary-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2"
           >
             <CheckCircle2 size={18} />
             <span>Profile Updated!</span>
@@ -2441,22 +2346,22 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
         )}
       </div>
 
-      <Card className="p-8">
-        <form onSubmit={handleSave} className="space-y-8">
+      <Card className="p-4 md:p-8">
+        <form onSubmit={handleSave} className="space-y-6">
           {/* Profile Picture Section */}
           <div className="flex flex-col items-center space-y-4 pb-6 border-b border-slate-100">
             <div className="relative">
               <img 
                 src={formData.photoURL || user.photoURL || 'https://via.placeholder.com/150'} 
                 alt="Profile" 
-                className="w-32 h-32 rounded-full object-cover border-4 border-emerald-50 shadow-md"
+                className="w-32 h-32 rounded-full object-cover border-4 border-primary-50 shadow-md"
                 referrerPolicy="no-referrer"
               />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingImage}
-                className="absolute bottom-0 right-0 bg-emerald-600 text-white p-2 rounded-full shadow-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                className="absolute bottom-0 right-0 bg-primary-600 text-white p-2 rounded-full shadow-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
               >
                 {uploadingImage ? <RefreshCw className="animate-spin" size={18} /> : <Camera size={18} />}
               </button>
@@ -2469,7 +2374,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
               />
             </div>
             <div className="text-center">
-              <h2 className="text-xl font-bold text-slate-900">{user.displayName}</h2>
+              <h2 className="text-xl font-display font-bold text-slate-900">{user.displayName}</h2>
               <p className="text-slate-500">{user.email}</p>
             </div>
           </div>
@@ -2486,7 +2391,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                     type="number" 
                     value={formData.height || ''}
                     onChange={e => setFormData({ ...formData, height: e.target.value ? Number(e.target.value) : undefined })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2495,7 +2400,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                     type="number" 
                     value={formData.weight || ''}
                     onChange={e => setFormData({ ...formData, weight: e.target.value ? Number(e.target.value) : undefined })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none"
                   />
                 </div>
               </div>
@@ -2507,7 +2412,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                     type="number" 
                     value={formData.age || ''}
                     onChange={e => setFormData({ ...formData, age: e.target.value ? Number(e.target.value) : undefined })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none"
                   />
                 </div>
                 <div className="space-y-2">
@@ -2515,7 +2420,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                   <select 
                     value={formData.gender || ''}
                     onChange={e => setFormData({ ...formData, gender: e.target.value as any })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none bg-white"
                   >
                     <option value="male">Male</option>
                     <option value="female">Female</option>
@@ -2530,7 +2435,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                   type="text" 
                   value={formData.nationality || ''}
                   onChange={e => setFormData({ ...formData, nationality: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none"
                 />
               </div>
             </div>
@@ -2544,7 +2449,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                 <select 
                   value={formData.activityLevel || ''}
                   onChange={e => setFormData({ ...formData, activityLevel: e.target.value as any })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none bg-white"
                 >
                   <option value="sedentary">Sedentary (Little/No exercise)</option>
                   <option value="light">Lightly Active (1-3 days/week)</option>
@@ -2559,7 +2464,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                 <select 
                   value={formData.goal || ''}
                   onChange={e => setFormData({ ...formData, goal: e.target.value as any })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none bg-white"
                 >
                   <option value="weight_loss">Weight Loss</option>
                   <option value="muscle_gain">Muscle Gain</option>
@@ -2578,7 +2483,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                       onClick={() => setFormData({ ...formData, fitnessLevel: level as any })}
                       className={cn(
                         "py-2 rounded-xl border text-sm transition-all capitalize",
-                        formData.fitnessLevel === level ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-200 text-slate-600 hover:border-emerald-200"
+                        formData.fitnessLevel === level ? "bg-primary-600 text-white border-primary-600" : "border-slate-200 text-slate-600 hover:border-primary-200"
                       )}
                     >
                       {level}
@@ -2586,6 +2491,66 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+              <Bell className="text-emerald-500" size={20} />
+              Notification Preferences
+            </h3>
+            
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-slate-900">Enable Notifications</p>
+                  <p className="text-sm text-slate-500">Receive in-app reminders for water and meals.</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={formData.notificationsEnabled}
+                    onChange={(e) => setFormData({...formData, notificationsEnabled: e.target.checked})}
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {formData.notificationsEnabled && (
+                <div className="pt-4 border-t border-slate-200 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-slate-900">Meal Reminders</p>
+                      <p className="text-sm text-slate-500">Get reminded to log your meals.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        className="sr-only peer"
+                        checked={formData.mealReminderEnabled}
+                        onChange={(e) => setFormData({...formData, mealReminderEnabled: e.target.checked})}
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Water Reminder Interval</label>
+                    <select
+                      value={formData.waterReminderInterval}
+                      onChange={(e) => setFormData({...formData, waterReminderInterval: Number(e.target.value)})}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all bg-white"
+                    >
+                      <option value={30}>Every 30 minutes</option>
+                      <option value={60}>Every 1 hour</option>
+                      <option value={90}>Every 1.5 hours</option>
+                      <option value={120}>Every 2 hours</option>
+                      <option value={0}>Off</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2599,7 +2564,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                   type="text" 
                   value={formData.preferredExerciseSystem || ''}
                   onChange={e => setFormData({ ...formData, preferredExerciseSystem: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none"
                   placeholder="e.g. Push-Pull-Legs"
                 />
               </div>
@@ -2608,7 +2573,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                 <textarea 
                   value={formData.dietaryPreferences || ''}
                   onChange={e => setFormData({ ...formData, dietaryPreferences: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none h-24 resize-none"
                   placeholder="e.g. Vegan, No Nuts, Keto..."
                 />
               </div>
@@ -2617,14 +2582,22 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
                 <textarea 
                   value={formData.healthStatus || ''}
                   onChange={e => setFormData({ ...formData, healthStatus: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none h-24 resize-none"
                   placeholder="Any conditions we should know about?"
                 />
               </div>
             </div>
           </div>
 
-          <div className="pt-6 border-t border-slate-100 flex justify-end">
+          <div className="pt-6 border-t border-slate-100 flex flex-col md:flex-row justify-between gap-4">
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center justify-center gap-2 text-red-600 hover:text-red-700 font-bold px-4 py-2 rounded-xl hover:bg-red-50 transition-all"
+            >
+              <Trash2 size={20} />
+              Delete Account
+            </button>
             <Button type="submit" disabled={saving} className="w-full md:w-auto px-12 py-4 text-lg">
               {saving ? <RefreshCw className="animate-spin mr-2" size={20} /> : <CheckCircle2 className="mr-2" size={20} />}
               {saving ? "Saving Changes..." : "Save Profile"}
@@ -2632,6 +2605,43 @@ function ProfileSettings({ user, onUpdate }: { user: UserProfile, onUpdate: (u: 
           </div>
         </form>
       </Card>
+
+      {/* Delete Account Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8"
+            >
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-2xl font-display font-bold text-slate-900 text-center mb-2">Delete Account?</h3>
+              <p className="text-slate-500 text-center mb-8">
+                Are you sure you want to delete your account? This action is permanent and all your data, including plans and logs, will be lost forever.
+              </p>
+              <div className="flex gap-4">
+                <Button 
+                  variant="outline" 
+                  className="flex-1 py-4"
+                  onClick={() => setShowDeleteConfirm(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white border-none"
+                  onClick={handleDeleteAccount}
+                >
+                  Delete Forever
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -2647,69 +2657,358 @@ function StatBox({ label, value }: { label: string, value: any }) {
 
 
 function CoachMarketplace() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCoach, setSelectedCoach] = useState<any | null>(null);
+
   const coaches = [
-    { id: 1, name: 'Coach Ahmed', specialty: 'Bodybuilding', rating: 4.9, price: 50, image: 'https://picsum.photos/seed/coach1/400/400' },
-    { id: 2, name: 'Sarah Wellness', specialty: 'Yoga & Nutrition', rating: 4.8, price: 40, image: 'https://picsum.photos/seed/coach2/400/400' },
-    { id: 3, name: 'Capt. Omar', specialty: 'Crossfit', rating: 5.0, price: 60, image: 'https://picsum.photos/seed/coach3/400/400' },
+    { 
+      id: 1, 
+      name: 'Ahmed Hassan', 
+      specialty: 'Bodybuilding & Strength', 
+      rating: 4.9, 
+      reviews: 124,
+      price: 50, 
+      image: 'https://picsum.photos/seed/coach1/400/400',
+      experience: '8 Years',
+      activeClients: 45,
+      about: 'Certified personal trainer specializing in muscle hypertrophy and strength conditioning. I help clients build sustainable habits for long-term muscle growth.',
+      tags: ['Muscle Gain', 'Strength', 'Nutrition'],
+      verified: true
+    },
+    { 
+      id: 2, 
+      name: 'Sarah Wellness', 
+      specialty: 'Yoga & Mobility', 
+      rating: 4.8, 
+      reviews: 89,
+      price: 40, 
+      image: 'https://picsum.photos/seed/coach2/400/400',
+      experience: '5 Years',
+      activeClients: 30,
+      about: 'Holistic wellness coach focusing on flexibility, core strength, and mental well-being through advanced yoga practices and mindful nutrition.',
+      tags: ['Yoga', 'Flexibility', 'Mindfulness'],
+      verified: true
+    },
+    { 
+      id: 3, 
+      name: 'Capt. Omar', 
+      specialty: 'Crossfit & HIIT', 
+      rating: 5.0, 
+      reviews: 210,
+      price: 60, 
+      image: 'https://picsum.photos/seed/coach3/400/400',
+      experience: '10 Years',
+      activeClients: 60,
+      about: 'Former competitive athlete turned coach. My programs are high-intensity, designed to push your limits and maximize cardiovascular endurance and power.',
+      tags: ['Crossfit', 'HIIT', 'Endurance'],
+      verified: true
+    },
+    { 
+      id: 4, 
+      name: 'Nour Dietitian', 
+      specialty: 'Clinical Nutrition', 
+      rating: 4.7, 
+      reviews: 156,
+      price: 45, 
+      image: 'https://picsum.photos/seed/coach4/400/400',
+      experience: '6 Years',
+      activeClients: 80,
+      about: 'Registered dietitian helping you achieve your weight goals without restrictive diets. I create personalized meal plans based on your metabolic needs.',
+      tags: ['Weight Loss', 'Meal Planning', 'Clinical'],
+      verified: false
+    },
+    { 
+      id: 5, 
+      name: 'Kareem Fit', 
+      specialty: 'Calisthenics', 
+      rating: 4.9, 
+      reviews: 92,
+      price: 55, 
+      image: 'https://picsum.photos/seed/coach5/400/400',
+      experience: '7 Years',
+      activeClients: 25,
+      about: 'Master your bodyweight. I teach progressive calisthenics from basic pushups to advanced skills like the planche and front lever.',
+      tags: ['Bodyweight', 'Gymnastics', 'Core'],
+      verified: true
+    },
+    { 
+      id: 6, 
+      name: 'Laila Run', 
+      specialty: 'Marathon Prep', 
+      rating: 4.8, 
+      reviews: 64,
+      price: 35, 
+      image: 'https://picsum.photos/seed/coach6/400/400',
+      experience: '4 Years',
+      activeClients: 40,
+      about: 'Marathon finisher and running coach. Whether you are aiming for your first 5K or a sub-3 hour marathon, I will get you to the finish line.',
+      tags: ['Running', 'Cardio', 'Endurance'],
+      verified: false
+    },
   ];
+
+  const categories = ['All', 'Bodybuilding', 'Yoga', 'Crossfit', 'Nutrition', 'Calisthenics', 'Running'];
+
+  const filteredCoaches = coaches.filter(coach => {
+    const matchesSearch = coach.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          coach.specialty.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'All' || coach.tags.some(tag => tag.includes(selectedCategory)) || coach.specialty.includes(selectedCategory);
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-8"
+      className="space-y-6 md:space-y-8 pb-20"
     >
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Header & Search */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Expert Coaches</h1>
-          <p className="text-slate-500">Find the perfect trainer to guide your journey.</p>
+          <h1 className="text-3xl md:text-4xl font-display font-black text-slate-900 tracking-tight mb-2">Expert Coaches</h1>
+          <p className="text-slate-500 font-medium">Find the perfect trainer to guide your fitness journey.</p>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+        <div className="relative w-full md:w-80">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
           <input 
             type="text" 
-            placeholder="Search by specialty..." 
-            className="pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none w-full md:w-64"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search coaches or specialties..." 
+            className="pl-12 pr-4 py-3 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 outline-none w-full transition-all font-medium"
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {coaches.map(coach => (
-          <Card key={coach.id} className="group hover:shadow-xl transition-all duration-300">
-            <div className="h-48 overflow-hidden relative">
-              <img src={coach.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-              <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-2 py-1 rounded-lg flex items-center gap-1 text-sm font-bold text-slate-900 shadow-sm">
-                <TrendingUp size={14} className="text-emerald-600" />
-                {coach.rating}
-              </div>
-            </div>
-            <div className="p-6">
-              <h3 className="text-xl font-bold text-slate-900 mb-1">{coach.name}</h3>
-              <p className="text-sm text-emerald-600 font-semibold mb-4">{coach.specialty}</p>
-              <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Starting at</p>
-                  <p className="text-lg font-bold text-slate-900">${coach.price}<span className="text-sm font-medium text-slate-400">/mo</span></p>
-                </div>
-                <Button size="sm">View Profile</Button>
-              </div>
-            </div>
-          </Card>
+      {/* Categories */}
+      <div className="flex overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 gap-2 scrollbar-hide">
+        {categories.map(category => (
+          <button
+            key={category}
+            onClick={() => setSelectedCategory(category)}
+            className={cn(
+              "px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all",
+              selectedCategory === category 
+                ? "bg-slate-900 text-white shadow-lg shadow-slate-200" 
+                : "bg-white border-2 border-slate-100 text-slate-600 hover:border-slate-200 hover:bg-slate-50"
+            )}
+          >
+            {category}
+          </button>
         ))}
       </div>
+
+      {/* Coaches Grid */}
+      {filteredCoaches.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filteredCoaches.map(coach => (
+            <Card key={coach.id} className="group hover:shadow-2xl hover:shadow-primary-500/5 transition-all duration-500 border-2 border-transparent hover:border-primary-100 overflow-hidden flex flex-col p-0">
+              <div className="h-56 overflow-hidden relative">
+                <img src={coach.image} alt={coach.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out" />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
+                
+                <div className="absolute top-4 right-4 bg-white/95 backdrop-blur px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-sm font-black text-slate-900 shadow-lg">
+                  <Star size={16} className="text-amber-400 fill-amber-400" />
+                  {coach.rating}
+                  <span className="text-slate-400 font-medium text-xs ml-1">({coach.reviews})</span>
+                </div>
+
+                <div className="absolute bottom-4 left-4 right-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-2xl font-display font-black text-white">{coach.name}</h3>
+                    {coach.verified && (
+                      <div className="bg-blue-500 text-white p-1 rounded-full" title="Verified Coach">
+                        <Check size={12} strokeWidth={4} />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-primary-300 font-bold text-sm">{coach.specialty}</p>
+                </div>
+              </div>
+              
+              <div className="p-6 flex-1 flex flex-col">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {coach.tags.map(tag => (
+                    <span key={tag} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                
+                <div className="flex items-center justify-between mb-6 text-sm font-medium text-slate-500 bg-slate-50 p-3 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <Award size={16} className="text-primary-500" />
+                    <span>{coach.experience} Exp.</span>
+                  </div>
+                  <div className="w-px h-4 bg-slate-200" />
+                  <div className="flex items-center gap-2">
+                    <Users size={16} className="text-blue-500" />
+                    <span>{coach.activeClients} Clients</span>
+                  </div>
+                </div>
+
+                <div className="mt-auto flex items-center justify-between pt-4 border-t border-slate-100">
+                  <div>
+                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Monthly Plan</p>
+                    <p className="text-2xl font-black text-slate-900">${coach.price}</p>
+                  </div>
+                  <Button 
+                    onClick={() => setSelectedCoach(coach)}
+                    className="bg-slate-900 text-white hover:bg-primary-600 transition-colors px-6 rounded-xl font-bold"
+                  >
+                    View Profile
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+            <Search size={32} className="text-slate-300" />
+          </div>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">No coaches found</h3>
+          <p className="text-slate-500">Try adjusting your search or category filter.</p>
+          <Button 
+            variant="outline" 
+            className="mt-6"
+            onClick={() => { setSearchQuery(''); setSelectedCategory('All'); }}
+          >
+            Clear Filters
+          </Button>
+        </div>
+      )}
+
+      {/* Coach Profile Modal */}
+      <AnimatePresence>
+        {selectedCoach && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={() => setSelectedCoach(null)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-2xl bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="h-64 sm:h-80 relative shrink-0">
+                <img src={selectedCoach.image} alt={selectedCoach.name} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent" />
+                <button 
+                  onClick={() => setSelectedCoach(null)}
+                  className="absolute top-4 right-4 w-10 h-10 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full flex items-center justify-center text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+                <div className="absolute bottom-6 left-6 right-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h2 className="text-3xl sm:text-4xl font-display font-black text-white">{selectedCoach.name}</h2>
+                    {selectedCoach.verified && (
+                      <div className="bg-blue-500 text-white p-1.5 rounded-full shadow-lg">
+                        <Check size={16} strokeWidth={4} />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-primary-400 font-bold text-lg">{selectedCoach.specialty}</p>
+                </div>
+              </div>
+
+              <div className="p-6 sm:p-8 overflow-y-auto">
+                <div className="flex flex-wrap gap-4 mb-8">
+                  <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center gap-4">
+                    <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0">
+                      <Star size={24} className="fill-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-0.5">Rating</p>
+                      <p className="text-lg font-black text-slate-900">{selectedCoach.rating} <span className="text-sm font-medium text-slate-500">({selectedCoach.reviews})</span></p>
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center shrink-0">
+                      <Users size={24} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-0.5">Active Clients</p>
+                      <p className="text-lg font-black text-slate-900">{selectedCoach.activeClients}</p>
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center gap-4">
+                    <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
+                      <Award size={24} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-0.5">Experience</p>
+                      <p className="text-lg font-black text-slate-900">{selectedCoach.experience}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold text-slate-900 mb-3">About Me</h3>
+                  <p className="text-slate-600 leading-relaxed font-medium">{selectedCoach.about}</p>
+                </div>
+
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold text-slate-900 mb-3">Specialties</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedCoach.tags.map((tag: string) => (
+                      <span key={tag} className="px-4 py-2 bg-primary-50 text-primary-700 rounded-xl text-sm font-bold">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 rounded-3xl p-6 sm:p-8 text-white flex flex-col sm:flex-row items-center justify-between gap-6">
+                  <div>
+                    <p className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-1">Start Training Today</p>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-4xl font-black">${selectedCoach.price}</span>
+                      <span className="text-slate-400 font-medium">/month</span>
+                    </div>
+                  </div>
+                  <Button 
+                    className="w-full sm:w-auto bg-primary-500 hover:bg-primary-600 text-white px-8 py-4 rounded-2xl font-black text-lg shadow-xl shadow-primary-500/20 transition-all active:scale-95"
+                    onClick={() => {
+                      alert(`Subscription request sent to ${selectedCoach.name}!`);
+                      setSelectedCoach(null);
+                    }}
+                  >
+                    Subscribe Now
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
 
-function ProgressView({ logs }: { logs: DailyLog[] }) {
+function ProgressView({ logs, user, onUpdate }: { logs: DailyLog[], user: UserProfile, onUpdate: (u: UserProfile) => void }) {
   const data = logs.slice().reverse().map(log => {
-    const totalBurned = (log.workouts || []).reduce((sum, w) => sum + (w.caloriesBurned || 0), 0);
+    const totalBurned = (log.workouts || []).reduce((sum, w) => sum + (w.caloriesBurned || 0), 0) + (log.fitCalories || 0);
     const totalDuration = (log.workouts || []).reduce((sum, w) => sum + (w.duration || 0), 0);
+    const totalSteps = (log.fitSteps || 0);
+    const totalActiveMinutes = (log.fitActiveMinutes || 0) + totalDuration;
+    
     return {
       ...log,
+      dateFormatted: new Date(log.date).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' }),
       totalBurned,
-      totalDuration
+      totalDuration,
+      totalSteps,
+      totalActiveMinutes,
+      netCalories: (log.totalCalories || 0) - totalBurned
     };
   });
 
@@ -2717,19 +3016,30 @@ function ProgressView({ logs }: { logs: DailyLog[] }) {
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-8"
+      className="space-y-4 md:space-y-6 pb-20"
     >
-      <h1 className="text-3xl font-bold text-slate-900">Your Progress</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-900">Progress Tracking</h1>
+        <p className="text-slate-500">Comprehensive overview of your performance</p>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card className="p-8 lg:col-span-2">
-          <h3 className="text-xl font-bold text-slate-900 mb-8">Weight Tracker</h3>
-          <div className="h-80 w-full">
+      <InBodyScanner user={user} onUpdate={onUpdate} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        {/* Weight Tracker */}
+        <Card className="p-4 md:p-8 lg:col-span-2 shadow-sm border-primary-100">
+          <div className="flex items-center gap-3 mb-6 md:mb-8">
+            <div className="w-10 h-10 rounded-xl bg-primary-100 text-primary-600 flex items-center justify-center">
+              <Activity size={20} />
+            </div>
+            <h3 className="text-lg md:text-xl font-display font-bold text-slate-900">Weight Tracking</h3>
+          </div>
+          <div className="h-64 md:h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data}>
+              <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis domain={['dataMin - 5', 'dataMax + 5']} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                <XAxis dataKey="dateFormatted" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dy={10} />
+                <YAxis domain={['dataMin - 2', 'dataMax + 2']} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dx={-10} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                   cursor={{ stroke: '#f1f5f9', strokeWidth: 2 }}
@@ -2739,7 +3049,7 @@ function ProgressView({ logs }: { logs: DailyLog[] }) {
                   dataKey="weight" 
                   name="Weight (kg)" 
                   stroke="#3b82f6" 
-                  strokeWidth={3}
+                  strokeWidth={4}
                   dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }}
                   activeDot={{ r: 6, strokeWidth: 0 }}
                   connectNulls
@@ -2749,97 +3059,60 @@ function ProgressView({ logs }: { logs: DailyLog[] }) {
           </div>
         </Card>
 
-        <Card className="p-8">
-          <h3 className="text-xl font-bold text-slate-900 mb-8">Calorie Intake History</h3>
-          <div className="h-80 w-full">
+        {/* Calories: Intake vs Burned */}
+        <Card className="p-4 md:p-8 shadow-sm border-primary-100">
+          <div className="flex items-center gap-3 mb-6 md:mb-8">
+            <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+              <Flame size={20} />
+            </div>
+            <h3 className="text-lg md:text-xl font-display font-bold text-slate-900">Calories</h3>
+          </div>
+          <div className="h-64 md:h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
+              <BarChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                <XAxis dataKey="dateFormatted" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dx={-10} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                   cursor={{ fill: '#f8fafc' }}
                 />
-                <Bar dataKey="totalCalories" name="Intake (kcal)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="totalCalories" name="Consumed (kcal)" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="totalBurned" name="Burned (kcal)" fill="#f43f5e" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Card>
 
-        <Card className="p-8">
-          <h3 className="text-xl font-bold text-slate-900 mb-8">Calories Burned (Workouts)</h3>
-          <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  cursor={{ fill: '#f8fafc' }}
-                />
-                <Bar dataKey="totalBurned" name="Burned (kcal)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+        {/* Steps Tracker */}
+        <Card className="p-4 md:p-8 shadow-sm border-primary-100">
+          <div className="flex items-center gap-3 mb-6 md:mb-8">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
+              <Footprints size={20} />
+            </div>
+            <h3 className="text-lg md:text-xl font-display font-bold text-slate-900">Daily Steps</h3>
           </div>
-        </Card>
-
-        <Card className="p-8 lg:col-span-2">
-          <h3 className="text-xl font-bold text-slate-900 mb-8">Workout Duration (Minutes)</h3>
-          <div className="h-80 w-full">
+          <div className="h-64 md:h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data}>
-                <defs>
-                  <linearGradient id="colorDuration" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  cursor={{ fill: '#f8fafc' }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="totalDuration" 
-                  name="Duration (min)"
-                  stroke="#8b5cf6" 
-                  fillOpacity={1} 
-                  fill="url(#colorDuration)" 
-                  strokeWidth={3} 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card className="p-8 lg:col-span-2">
-          <h3 className="text-xl font-bold text-slate-900 mb-8">Google Fit Activity (Steps)</h3>
-          <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data}>
+              <AreaChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
                 <defs>
                   <linearGradient id="colorSteps" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                <XAxis dataKey="dateFormatted" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dx={-10} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  cursor={{ fill: '#f8fafc' }}
+                  cursor={{ stroke: '#f1f5f9', strokeWidth: 2 }}
                 />
                 <Area 
                   type="monotone" 
-                  dataKey="fitSteps" 
+                  dataKey="totalSteps" 
                   name="Steps"
-                  stroke="#f97316" 
+                  stroke="#10b981" 
                   fillOpacity={1} 
                   fill="url(#colorSteps)" 
                   strokeWidth={3} 
@@ -2848,58 +3121,198 @@ function ProgressView({ logs }: { logs: DailyLog[] }) {
             </ResponsiveContainer>
           </div>
         </Card>
+
+        {/* Active Minutes */}
+        <Card className="p-4 md:p-8 shadow-sm border-primary-100">
+          <div className="flex items-center gap-3 mb-6 md:mb-8">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
+              <Timer size={20} />
+            </div>
+            <h3 className="text-lg md:text-xl font-display font-bold text-slate-900">Activity Minutes</h3>
+          </div>
+          <div className="h-64 md:h-80 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <defs>
+                  <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="dateFormatted" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dx={-10} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ stroke: '#f1f5f9', strokeWidth: 2 }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="totalActiveMinutes" 
+                  name="Activity Minutes"
+                  stroke="#8b5cf6" 
+                  fillOpacity={1} 
+                  fill="url(#colorActive)" 
+                  strokeWidth={3} 
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        {/* Water Intake */}
+        <Card className="p-4 md:p-8 shadow-sm border-primary-100">
+          <div className="flex items-center gap-3 mb-6 md:mb-8">
+            <div className="w-10 h-10 rounded-xl bg-cyan-100 text-cyan-600 flex items-center justify-center">
+              <Droplets size={20} />
+            </div>
+            <h3 className="text-lg md:text-xl font-display font-bold text-slate-900">Water Intake</h3>
+          </div>
+          <div className="h-64 md:h-80 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="dateFormatted" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} dx={-10} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: '#f8fafc' }}
+                />
+                <Bar dataKey="waterIntake" name="Water (Cups)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
       </div>
     </motion.div>
   );
 }
 
-function HealthAssistant() {
-  const [messages, setMessages] = useState<{ role: 'user' | 'ai', text: string }[]>([
-    { role: 'ai', text: 'Hello! I am NABD, your personal health assistant. How can I help you today?' }
-  ]);
+function HealthAssistant({ user, onUpdate }: { user: UserProfile, onUpdate: (u: UserProfile) => void }) {
+  const [messages, setMessages] = useState<{ role: 'user' | 'ai', text: string, timestamp?: any }[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [recentActivity, setRecentActivity] = useState<any>(null);
+
+  useEffect(() => {
+    // Load chat history
+    const q = query(
+      collection(db, 'users', user.uid, 'chatHistory'),
+      orderBy('timestamp', 'asc'),
+      limit(50)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const history = snapshot.docs.map(doc => ({
+        role: doc.data().role as 'user' | 'ai',
+        text: doc.data().text,
+        timestamp: doc.data().timestamp
+      }));
+      
+      if (history.length === 0) {
+        setMessages([{ role: 'ai', text: 'Welcome, champion! I am NABD, your personal health assistant~ I can speak with you in English or Arabic (including Egyptian dialect)~ How can I help you today? ⚡️💪' }]);
+      } else {
+        setMessages(history);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}/chatHistory`);
+    });
+
+    // Load recent activity (last 3 days)
+    const loadActivity = async () => {
+      const today = new Date();
+      const activity: any = {};
+      
+      for (let i = 0; i < 3; i++) {
+        const d = new Date();
+        d.setDate(today.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        try {
+          const logDoc = await getDoc(doc(db, 'users', user.uid, 'dailyLogs', dateStr));
+          if (logDoc.exists()) {
+            activity[dateStr] = logDoc.data();
+          }
+        } catch (err) {
+          console.error("Error loading activity for", dateStr, err);
+        }
+      }
+      setRecentActivity(activity);
+    };
+
+    loadActivity();
+    return () => unsubscribe();
+  }, [user.uid]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
+    if ((user.credits || 0) < 1) {
+      setMessages(prev => [...prev, { role: 'ai', text: "Sorry, your balance is insufficient~ Please recharge your balance from the plans and subscriptions page to continue the conversation~ 🙏" }]);
+      return;
+    }
+
     const userMsg = input;
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
-    setLoading(true);
-
+    
     try {
-      const response = await chatWithHealthAssistant(userMsg, messages);
-      setMessages(prev => [...prev, { role: 'ai', text: response || "I'm sorry, I couldn't process that." }]);
+      // Save user message to Firestore
+      await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
+        role: 'user',
+        text: userMsg,
+        timestamp: serverTimestamp()
+      });
+
+      setLoading(true);
+
+      const response = await chatWithHealthAssistant(userMsg, messages, user, recentActivity);
+      const aiMsg = response || "I'm sorry buddy, something went wrong while I was trying to respond~ Try again? 😅";
+      
+      // Save AI response to Firestore
+      await addDoc(collection(db, 'users', user.uid, 'chatHistory'), {
+        role: 'ai',
+        text: aiMsg,
+        timestamp: serverTimestamp()
+      });
+      
+      // Deduct credit
+      const newCredits = (user.credits || 0) - 1;
+      await updateDoc(doc(db, 'users', user.uid), { credits: newCredits });
+      onUpdate({ ...user, credits: newCredits });
     } catch (error) {
       console.error('Chat error:', error);
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/chatHistory`);
     } finally {
       setLoading(false);
     }
   };
 
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="max-w-3xl mx-auto h-[calc(100vh-12rem)] flex flex-col"
+      className="max-w-3xl mx-auto h-[calc(100vh-14rem)] md:h-[calc(100vh-12rem)] flex flex-col"
     >
       <Card className="flex-1 flex flex-col overflow-hidden">
-        <div className="p-6 border-b border-emerald-50 bg-emerald-50/30 flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white">
-            <MessageSquare size={20} />
+        <div className="p-4 md:p-6 border-b border-primary-50 bg-primary-50/30 flex items-center gap-3">
+          <div className="w-8 h-8 md:w-10 md:h-10 bg-primary-600 rounded-lg md:rounded-xl flex items-center justify-center text-white">
+            <MessageSquare size={18} />
           </div>
           <div>
-            <h3 className="font-bold text-emerald-900">NABD AI Assistant</h3>
-            <p className="text-xs text-emerald-600 font-semibold">Online & Ready to help</p>
+            <h3 className="text-sm md:text-base font-display font-bold text-primary-900">NABD AI Assistant</h3>
+            <p className="text-[10px] md:text-xs text-primary-600 font-semibold">Online & Ready to help</p>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6">
           {messages.map((msg, idx) => (
             <div key={idx} className={cn("flex", msg.role === 'user' ? "justify-end" : "justify-start")}>
               <div className={cn(
-                "max-w-[80%] p-4 rounded-2xl text-sm leading-relaxed",
-                msg.role === 'user' ? "bg-emerald-600 text-white rounded-tr-none" : "bg-slate-100 text-slate-800 rounded-tl-none"
+                "max-w-[80%] p-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap",
+                msg.role === 'user' ? "bg-primary-600 text-white rounded-tr-none" : "bg-slate-100 text-slate-800 rounded-tl-none"
               )}>
                 {msg.text}
               </div>
@@ -2914,9 +3327,10 @@ function HealthAssistant() {
               </div>
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-6 border-t border-emerald-50">
+        <div className="p-6 border-t border-primary-50">
           <div className="flex gap-2">
             <input 
               type="text" 
@@ -2924,7 +3338,7 @@ function HealthAssistant() {
               onChange={e => setInput(e.target.value)}
               onKeyPress={e => e.key === 'Enter' && handleSend()}
               placeholder="Ask anything about health, nutrition, or exercise..."
-              className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none"
             />
             <Button onClick={handleSend} disabled={loading}>
               <ChevronRight size={20} />

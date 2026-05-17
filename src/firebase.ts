@@ -17,14 +17,24 @@ export const storage = getStorage(app);
 async function testConnection() {
   try {
     // Attempt to fetch a non-existent document to test connectivity
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firestore connection test successful.");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. The client is offline.");
+    const snap = await getDocFromServer(doc(db, 'test', 'connection'));
+    if (snap.exists()) {
+      console.log("Firestore connection test successful: Document exists.");
+    } else {
+      console.log("Firestore connection test successful: Backend reached (doc does not exist).");
     }
-    // Other errors (like permission denied) are expected if the doc doesn't exist or rules block it,
-    // but they still indicate that the backend was reached.
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message.includes('the client is offline') || error.message.includes('unavailable')) {
+        console.error("Firestore connectivity failure: The client is offline or the service is unavailable.");
+      } else if (error.message.includes('permission-denied')) {
+        console.warn("Firestore connectivity warning: Backend reached, but permission was denied for the test path.");
+      } else {
+        console.error("Firestore connection test error:", error.message);
+      }
+    } else {
+      console.error("Firestore connection test failed with an unknown error:", error);
+    }
   }
 }
 testConnection();

@@ -127,9 +127,9 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
       }, { merge: true });
       
       setMetrics(prev => prev ? { ...prev, sleepDuration: duration, sleepQuality } : null);
-      alert('تم حفظ بيانات النوم بنجاح');
+      alert('Sleep data saved successfully');
     } catch (err) {
-      setError('فشل حفظ بيانات النوم');
+      setError('Failed to save sleep data');
     } finally {
       setIsSavingSleep(false);
     }
@@ -149,14 +149,14 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
       // Calculate for 6, 5, and 4 cycles
       [6, 5, 4].forEach(cycles => {
         const sleepDate = new Date(wakeDate.getTime() - (cycles * cycleMinutes + fallAsleepMinutes) * 60000);
-        results.push(sleepDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }));
+        results.push(sleepDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }));
       });
     } else {
       // "I'm sleeping now, when should I wake up?"
       const now = new Date();
       [6, 5, 4].forEach(cycles => {
         const wakeDate = new Date(now.getTime() + (cycles * cycleMinutes + fallAsleepMinutes) * 60000);
-        results.push(wakeDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }));
+        results.push(wakeDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }));
       });
     }
     setCalcResults(results);
@@ -180,7 +180,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
       
       window.addEventListener('message', handleMessage);
     } catch (err) {
-      setError('فشل الاتصال بـ Google Fit');
+      setError('Failed to connect to Google Fit');
     }
   };
 
@@ -228,7 +228,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
       }, { merge: true });
 
     } catch (err) {
-      setError('خطأ في مزامنة البيانات الصحية');
+      setError('Error syncing health data');
     } finally {
       setIsSyncing(false);
     }
@@ -250,7 +250,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
       const result = await analyzeHealthData(metrics, user, history);
       setAnalysis(result);
     } catch (err) {
-      setError('فشل تحليل البيانات الصحية');
+      setError('Failed to analyze health data');
     } finally {
       setIsAnalyzing(false);
     }
@@ -264,19 +264,19 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
     >
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">مزامنة الساعة الذكية</h1>
-          <p className="text-slate-500">قم بتوصيل ساعتك الذكية لتتبع المؤشرات الحيوية والحصول على رؤى علمية.</p>
+          <h1 className="text-3xl font-bold text-slate-900">Smartwatch Sync</h1>
+          <p className="text-slate-500">Connect your smartwatch to track vital metrics and get scientific insights.</p>
         </div>
         <div className="flex gap-2">
           {!user.googleFitTokens ? (
             <Button onClick={connectGoogleFit}>
               <Watch size={20} />
-              ربط Google Fit
+              Connect Google Fit
             </Button>
           ) : (
             <Button onClick={() => syncData()} disabled={isSyncing} variant="outline">
               {isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />}
-              مزامنة الآن
+              Sync Now
             </Button>
           )}
         </div>
@@ -292,29 +292,29 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <MetricCard 
           icon={<Heart className="text-red-500" />} 
-          label="نبضات القلب" 
-          value={metrics?.heartRate ? `${metrics.heartRate} نبضة/د` : '--'} 
-          status={metrics?.heartRate ? (metrics.heartRate > 100 ? 'مرتفع' : 'طبيعي') : null}
+          label="Heart Rate" 
+          value={metrics?.heartRate ? `${metrics.heartRate} bpm` : '--'} 
+          status={metrics?.heartRate ? (metrics.heartRate > 100 ? 'High' : 'Normal') : null}
           color="red"
         />
         <MetricCard 
           icon={<Activity className="text-blue-500" />} 
-          label="ضغط الدم" 
+          label="Blood Pressure" 
           value={metrics?.bloodPressure ? `${metrics.bloodPressure.systolic}/${metrics.bloodPressure.diastolic}` : '--'} 
-          status={metrics?.bloodPressure ? (metrics.bloodPressure.systolic > 130 ? 'مرتفع قليلاً' : 'طبيعي') : null}
+          status={metrics?.bloodPressure ? (metrics.bloodPressure.systolic > 130 ? 'Slightly High' : 'Normal') : null}
           color="blue"
         />
         <MetricCard 
           icon={<Brain className="text-purple-500" />} 
-          label="الحالة النفسية" 
-          value={metrics?.stressLevel ? `${metrics.stressLevel}/10` : 'مستقرة'} 
-          status="هادئ"
+          label="Mental State" 
+          value={metrics?.stressLevel ? `${metrics.stressLevel}/10` : 'Stable'} 
+          status="Calm"
           color="purple"
         />
         <MetricCard 
           icon={<Moon className="text-indigo-500" />} 
-          label="النوم" 
-          value={metrics?.sleepDuration ? `${Math.floor(metrics.sleepDuration / 60)}س ${metrics.sleepDuration % 60}د` : '--'} 
+          label="Sleep" 
+          value={metrics?.sleepDuration ? `${Math.floor(metrics.sleepDuration / 60)}h ${metrics.sleepDuration % 60}m` : '--'} 
           status={metrics?.sleepQuality || null}
           color="indigo"
         />
@@ -325,26 +325,26 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <Zap className="text-emerald-600" size={24} />
-              تحليل الصحة بالذكاء الاصطناعي
+              AI Health Analysis
             </h3>
             <Button onClick={runAnalysis} disabled={!metrics || isAnalyzing} size="sm">
-              {isAnalyzing ? 'جاري التحليل...' : 'بدء التحليل'}
+              {isAnalyzing ? 'Analyzing...' : 'Start Analysis'}
             </Button>
           </div>
 
           {analysis ? (
             <div className="space-y-6">
-              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-right" dir="rtl">
-                <h4 className="font-bold text-emerald-900 mb-2 flex items-center gap-2 justify-end">
+              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                <h4 className="font-bold text-emerald-900 mb-2 flex items-center gap-2">
                   <CheckCircle2 size={18} />
-                  ملخص الحالة والتوجهات
+                  Summary & Trends
                 </h4>
                 <p className="text-sm text-emerald-800 leading-relaxed">{analysis.statusSummary}</p>
               </div>
 
               {analysis.insights?.length > 0 && (
-                <div className="space-y-4 text-right" dir="rtl">
-                  <h4 className="font-bold text-slate-900">رؤى مخصصة (بناءً على تاريخك)</h4>
+                <div className="space-y-4">
+                  <h4 className="font-bold text-slate-900">Personalized Insights (Based on History)</h4>
                   <div className="grid gap-3">
                     {analysis.insights.map((insight: string, i: number) => (
                       <div key={i} className="flex gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100 justify-end">
@@ -358,25 +358,25 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                 </div>
               )}
 
-              <div className="space-y-4 text-right" dir="rtl">
-                <h4 className="font-bold text-slate-900">إرشادات وتوصيات علمية</h4>
+              <div className="space-y-4">
+                <h4 className="font-bold text-slate-900">Scientific Guidelines & Recommendations</h4>
                 <div className="grid gap-3">
                   {[...(analysis.guidance || []), ...(analysis.recommendations || [])].map((tip: string, i: number) => (
-                    <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 justify-end">
-                      <p className="text-sm text-slate-700">{tip}</p>
+                    <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
                       <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center text-emerald-600 shadow-sm flex-shrink-0">
                         {i + 1}
                       </div>
+                      <p className="text-sm text-slate-700">{tip}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
               {analysis.warnings?.length > 0 && (
-                <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100 text-right" dir="rtl">
-                  <h4 className="font-bold text-orange-900 mb-2 flex items-center gap-2 justify-end">
+                <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100">
+                  <h4 className="font-bold text-orange-900 mb-2 flex items-center gap-2">
                     <ShieldAlert size={18} />
-                    تحذيرات صحية هامة
+                    Important Health Warnings
                   </h4>
                   <ul className="list-disc list-inside text-sm text-orange-800 space-y-1">
                     {analysis.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}
@@ -387,7 +387,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
           ) : (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 text-center">
               <Brain size={48} className="mb-4 opacity-20" />
-              <p>قم بمزامنة بياناتك واضغط على "بدء التحليل" للحصول على رؤى صحية مخصصة مبنية على تاريخك وأحدث الأبحاث العلمية.</p>
+              <p>Sync your data and click "Start Analysis" to get personalized health insights based on your history and the latest scientific research.</p>
             </div>
           )}
         </Card>
@@ -395,7 +395,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
         <Card className="p-8">
           <h3 className="text-xl font-bold text-slate-900 mb-8 flex items-center gap-2">
             <TrendingUp className="text-emerald-600" size={24} />
-            سجل المؤشرات الحيوية
+            Vitals History
           </h3>
           <div className="space-y-6">
             <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -404,11 +404,11 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                   <Heart size={20} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">متوسط نبضات القلب</p>
-                  <p className="text-lg font-bold text-slate-900">72 نبضة/د</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Average Heart Rate</p>
+                  <p className="text-lg font-bold text-slate-900">72 bpm</p>
                 </div>
               </div>
-              <div className="text-emerald-600 font-bold text-sm">-4% عن الأسبوع الماضي</div>
+              <div className="text-emerald-600 font-bold text-sm">-4% from last week</div>
             </div>
 
             <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -417,19 +417,19 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                   <Activity size={20} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">متوسط ضغط الدم</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Average Blood Pressure</p>
                   <p className="text-lg font-bold text-slate-900">118/78</p>
                 </div>
               </div>
-              <div className="text-emerald-600 font-bold text-sm">مثالي</div>
+              <div className="text-emerald-600 font-bold text-sm">Ideal</div>
             </div>
 
-            <div className="pt-4 text-right" dir="rtl">
-              <h4 className="text-sm font-bold text-slate-900 mb-4">سياق علمي</h4>
+            <div className="pt-4">
+              <h4 className="text-sm font-bold text-slate-900 mb-4">Scientific Context</h4>
               <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
                 <Info size={20} className="text-blue-600 flex-shrink-0" />
                 <p className="text-xs text-blue-800 leading-relaxed">
-                  وفقاً لجمعية القلب الأمريكية، يتراوح معدل ضربات القلب الطبيعي للبالغين أثناء الراحة بين 60 و100 نبضة في الدقيقة. متوسطك الحالي البالغ 72 نبضة في الدقيقة يقع ضمن النطاق الأمثل لشخص بالغ يتمتع بصحة جيدة.
+                  According to the American Heart Association, a normal resting heart rate for adults ranges from 60 to 100 beats per minute. Your current average of 72 bpm falls within the optimal range for a healthy adult.
                 </p>
               </div>
             </div>
@@ -439,13 +439,13 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
         <Card className="p-8">
           <h3 className="text-xl font-bold text-slate-900 mb-8 flex items-center gap-2">
             <Moon className="text-indigo-600" size={24} />
-            تتبع وجودة النوم
+            Sleep Tracking & Quality
           </h3>
           
-          <div className="space-y-6 text-right" dir="rtl">
+          <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600">ساعات النوم</label>
+                <label className="text-sm font-bold text-slate-600">Sleep Hours</label>
                 <input 
                   type="number" 
                   value={sleepHours}
@@ -455,7 +455,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600">الدقائق</label>
+                <label className="text-sm font-bold text-slate-600">Minutes</label>
                 <input 
                   type="number" 
                   value={sleepMinutes}
@@ -467,7 +467,7 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-600">جودة النوم</label>
+              <label className="text-sm font-bold text-slate-600">Sleep Quality</label>
               <div className="grid grid-cols-4 gap-2">
                 {['poor', 'fair', 'good', 'excellent'].map((q) => (
                   <button
@@ -480,20 +480,20 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                         : "bg-white text-slate-500 border-slate-200 hover:border-indigo-200"
                     )}
                   >
-                    {q === 'poor' ? 'سيء' : q === 'fair' ? 'مقبول' : q === 'good' ? 'جيد' : 'ممتاز'}
+                    {q === 'poor' ? 'Poor' : q === 'fair' ? 'Fair' : q === 'good' ? 'Good' : 'Excellent'}
                   </button>
                 ))}
               </div>
             </div>
 
             <Button onClick={saveSleepLog} disabled={isSavingSleep} className="w-full bg-indigo-600 hover:bg-indigo-700">
-              {isSavingSleep ? 'جاري الحفظ...' : 'حفظ سجل النوم'}
+              {isSavingSleep ? 'Saving...' : 'Save Sleep Log'}
             </Button>
 
             <div className="pt-6 border-t border-slate-100">
               <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Clock size={18} className="text-indigo-600" />
-                حاسبة النوم الذكية
+                Smart Sleep Calculator
               </h4>
               
               <div className="p-4 bg-indigo-50 rounded-2xl space-y-4">
@@ -502,13 +502,13 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                     onClick={() => setCalcMode('wake')}
                     className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all", calcMode === 'wake' ? "bg-indigo-600 text-white" : "text-slate-500")}
                   >
-                    أريد الاستيقاظ في
+                    I want to wake up at
                   </button>
                   <button 
                     onClick={() => setCalcMode('sleep')}
                     className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all", calcMode === 'sleep' ? "bg-indigo-600 text-white" : "text-slate-500")}
                   >
-                    سأنام الآن
+                    I will sleep now
                   </button>
                 </div>
 
@@ -522,24 +522,24 @@ export default function SmartwatchModule({ user }: { user: UserProfile }) {
                 )}
 
                 <Button onClick={calculateSleep} variant="outline" className="w-full border-indigo-200 text-indigo-700 hover:bg-indigo-100">
-                  احسب المواعيد المثالية
+                  Calculate Ideal Times
                 </Button>
 
                 {calcResults.length > 0 && (
                   <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
                     <p className="text-xs text-indigo-800 font-bold text-center">
-                      {calcMode === 'wake' ? 'يجب أن تنام في أحد هذه الأوقات:' : 'يجب أن تستيقظ في أحد هذه الأوقات:'}
+                      {calcMode === 'wake' ? 'You should sleep at one of these times:' : 'You should wake up at one of these times:'}
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       {calcResults.map((time, i) => (
                         <div key={i} className="bg-white p-2 rounded-xl text-center shadow-sm border border-indigo-100">
                           <p className="text-xs font-bold text-indigo-600">{time}</p>
-                          <p className="text-[10px] text-slate-400">{6-i} دورات</p>
+                          <p className="text-[10px] text-slate-400">{6-i} cycles</p>
                         </div>
                       ))}
                     </div>
                     <p className="text-[10px] text-indigo-600 text-center leading-tight">
-                      تعتمد هذه الحسابات على دورات النوم الطبيعية (90 دقيقة) وتفترض 15 دقيقة للاستغراق في النوم.
+                      These calculations are based on natural sleep cycles (90 minutes) and assume 15 minutes to fall asleep.
                     </p>
                   </div>
                 )}
